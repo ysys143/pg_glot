@@ -1,0 +1,116 @@
+{
+  "build_status": {
+    "python-mecab-ko (baseline)": "OK (golden)",
+    "hephaex-mecab-ko (sejong OFF)": "OK",
+    "hephaex-mecab-ko (sejong ON)": "OK",
+    "lindera (ko-dic)": "OK"
+  },
+  "tokenizers": {
+    "python-mecab-ko (baseline)": {
+      "name": "python-mecab-ko (baseline)",
+      "m1_miracl": {
+        "exact_seq_match_rate": 1.0,
+        "mean_jaccard": 1.0,
+        "micro_set_precision": 1.0,
+        "micro_set_recall": 1.0,
+        "n_samples": 800,
+        "note": "self (baseline)"
+      },
+      "m1_mdn": {
+        "exact_seq_match_rate": 1.0,
+        "mean_jaccard": 1.0,
+        "micro_set_precision": 1.0,
+        "micro_set_recall": 1.0,
+        "n_samples": 800,
+        "note": "self (baseline)"
+      },
+      "m2_miracl_bm25": {
+        "n_docs": 1000,
+        "n_queries": 213,
+        "vocab_size": 14854,
+        "ndcg_at_10": 0.3147,
+        "recall_at_10": 0.3786,
+        "mrr": 0.3719,
+        "tokenize_time_sec": 0.46
+      }
+    },
+    "hephaex-mecab-ko (sejong OFF)": {
+      "name": "hephaex-mecab-ko (sejong OFF)",
+      "m1_miracl": {
+        "n_samples": 800,
+        "exact_seq_match_rate": 0.0362,
+        "mean_jaccard": 0.8734,
+        "micro_set_precision": 0.9268,
+        "micro_set_recall": 0.9353
+      },
+      "m1_mdn": {
+        "n_samples": 800,
+        "exact_seq_match_rate": 0.1,
+        "mean_jaccard": 0.9021,
+        "micro_set_precision": 0.9171,
+        "micro_set_recall": 0.9526
+      },
+      "m2_miracl_bm25": {
+        "n_docs": 1000,
+        "n_queries": 213,
+        "vocab_size": 15867,
+        "ndcg_at_10": 0.3066,
+        "recall_at_10": 0.3634,
+        "mrr": 0.3656,
+        "tokenize_time_sec": 0.59
+      }
+    },
+    "hephaex-mecab-ko (sejong ON)": {
+      "name": "hephaex-mecab-ko (sejong ON)",
+      "m1_miracl": {
+        "n_samples": 800,
+        "exact_seq_match_rate": 0.0063,
+        "mean_jaccard": 0.7336,
+        "micro_set_precision": 0.8323,
+        "micro_set_recall": 0.8524
+      },
+      "m1_mdn": {
+        "n_samples": 800,
+        "exact_seq_match_rate": 0.0013,
+        "mean_jaccard": 0.7313,
+        "micro_set_precision": 0.8315,
+        "micro_set_recall": 0.842
+      },
+      "m2_miracl_bm25": {
+        "n_docs": 1000,
+        "n_queries": 213,
+        "vocab_size": 15155,
+        "ndcg_at_10": 0.3108,
+        "recall_at_10": 0.3648,
+        "mrr": 0.3784,
+        "tokenize_time_sec": 0.88
+      }
+    },
+    "lindera (ko-dic)": {
+      "name": "lindera (ko-dic)",
+      "m1_miracl": {
+        "n_samples": 800,
+        "exact_seq_match_rate": 0.3525,
+        "mean_jaccard": 0.9649,
+        "micro_set_precision": 0.9812,
+        "micro_set_recall": 0.9837
+      },
+      "m1_mdn": {
+        "n_samples": 800,
+        "exact_seq_match_rate": 0.3625,
+        "mean_jaccard": 0.9758,
+        "micro_set_precision": 0.9846,
+        "micro_set_recall": 0.9844
+      },
+      "m2_miracl_bm25": {
+        "n_docs": 1000,
+        "n_queries": 213,
+        "vocab_size": 14825,
+        "ndcg_at_10": 0.3287,
+        "recall_at_10": 0.3811,
+        "mrr": 0.3986,
+        "tokenize_time_sec": 0.14
+      }
+    }
+  }
+}
