@@ -1,6 +1,6 @@
-//! korean-tokenizer — lindera 기반 한국어 형태소 토크나이저 (순수 Rust).
+//! glot-tokenizer — lindera 기반 한국어 형태소 토크나이저 (순수 Rust).
 //!
-//! `pg_tsvector_ko`(Layer A)가 이 크레이트로 PostgreSQL `korean` text search
+//! `pg_glot`(Layer A)가 이 크레이트로 PostgreSQL `korean` text search
 //! configuration(커스텀 TS parser)을 구성한다. lindera 사전은 백엔드 프로세스당
 //! 1회 로드해 불변 공유한다(`tokenize`가 `&self`).
 //!
@@ -28,7 +28,7 @@ pub const LINDERA_VERSION: &str = "3.0.7";
 ///
 /// 사전(또는 분절 정책에 영향을 주는 엔진 버전)이 바뀌면 기존 tsvector/BM25
 /// 인덱스는 stale이 된다 — **사전은 인덱스 정의의 일부**이므로 REINDEX가 필요하다.
-/// `pg_tsvector_ko`는 이를 `pg_tsvector_ko_dictionary_version()` SQL 함수로 노출한다.
+/// `pg_glot`는 이를 `glot.dictionary_version()` SQL 함수로 노출한다.
 #[must_use]
 pub fn dictionary_version() -> String {
     format!("{KO_DIC_VERSION} (lindera {LINDERA_VERSION}, embed-ko-dic)")
@@ -186,7 +186,7 @@ mod tests {
     /// 워크스페이스 `Cargo.lock`에서 실제로 해석된 lindera 패키지 버전을 추출.
     /// `[[package]]` 블록 중 `name = "lindera"`인 것의 `version = "..."`를 반환한다.
     fn locked_lindera_version() -> String {
-        // CARGO_MANIFEST_DIR = crates/korean-tokenizer → ../../ = 워크스페이스 루트.
+        // CARGO_MANIFEST_DIR = crates/glot-tokenizer → ../../ = 워크스페이스 루트.
         let lock_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock");
         let lock = std::fs::read_to_string(lock_path)
             .unwrap_or_else(|e| panic!("Cargo.lock 읽기 실패({lock_path}): {e}"));

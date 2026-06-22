@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# pg_textsearch_ko 통합 설치 — 의존성(pgvector, pg_textsearch)과 우리 확장 2개
-# (pg_tsvector_ko, pg_textsearch_ko)를 기존 PostgreSQL에 한 번에 빌드/설치한다.
+# pg_glot_hybrid 통합 설치 — 의존성(pgvector, pg_textsearch)과 우리 확장 2개
+# (pg_glot, pg_glot_hybrid)를 기존 PostgreSQL에 한 번에 빌드/설치한다.
 #
 # pg_textsearch/pgvector 소스는 각자의 공식 레포에서 *빌드 시 다운로드*하며
 # (재배포 아님, 버전 핀), 우리 확장은 cargo pgrx로 설치한다. 라이선스: docs/DESIGN.md §6.
@@ -56,7 +56,7 @@ else
 fi
 
 # ── 3) 우리 확장 (pgrx) ──────────────────────────────────────────────────────
-for ext in pg_tsvector_ko pg_textsearch_ko; do
+for ext in pg_glot pg_glot_hybrid; do
   log "installing $ext (cargo pgrx install --release)"
   ( cd "$REPO_ROOT/extensions/$ext" && cargo pgrx install --release --pg-config "$PG_CONFIG" )
 done
@@ -68,6 +68,6 @@ cat <<'EOF'
        shared_preload_libraries = 'pg_textsearch'
      (기존 preload가 있으면 콤마로 이어붙일 것)
   2) psql 에서 한 줄로 전체 스택 생성
-       CREATE EXTENSION pg_textsearch_ko CASCADE;
-     -> pg_tsvector_ko + pg_textsearch + vector 가 함께 생성됩니다.
+       CREATE EXTENSION pg_glot_hybrid CASCADE;
+     -> pg_glot + pg_textsearch + vector 가 함께 생성됩니다.
 EOF

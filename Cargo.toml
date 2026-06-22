@@ -1,24 +1,24 @@
-# pg_textsearch_ko — Cargo workspace (monorepo)
-# 계층: crates/korean-tokenizer(순수 Rust) → extensions/pg_tsvector_ko(Layer A, pgrx)
-#       → extensions/pg_textsearch_ko(Layer B, follow-on)
+# pg_glot_hybrid — Cargo workspace (monorepo)
+# 계층: crates/glot-tokenizer(순수 Rust) → extensions/pg_glot(Layer A, pgrx)
+#       → extensions/pg_glot_hybrid(Layer B, follow-on)
 # 설계: docs/DESIGN.md
 [workspace]
 resolver = "2"
 members = [
-    "crates/korean-tokenizer",
-    "extensions/pg_tsvector_ko",
-    "extensions/pg_textsearch_ko",
+    "crates/glot-tokenizer",
+    "extensions/pg_glot",
+    "extensions/pg_glot_hybrid",
 ]
 
 [workspace.package]
 version = "0.0.1"
 edition = "2021"
 license = "PostgreSQL"
-repository = "https://github.com/ysys143/pg_textsearch_ko"
+repository = "https://github.com/ysys143/pg_glot"
 authors = ["ysys143"]
 
 [workspace.dependencies]
-korean-tokenizer = { path = "crates/korean-tokenizer" }
+glot-tokenizer = { path = "crates/glot-tokenizer" }
 
 # pgrx 확장은 panic="unwind" 필수. 프로파일은 워크스페이스 루트에만 둘 수 있음(멤버 불가).
 [profile.dev]

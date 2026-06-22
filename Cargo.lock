@@ -790,6 +790,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
+name = "glot-tokenizer"
+version = "0.0.1"
+dependencies = [
+ "lindera",
+]
+
+[[package]]
 name = "half"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1169,13 +1176,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "korean-tokenizer"
-version = "0.0.1"
-dependencies = [
- "lindera",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1506,18 +1506,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "pg_textsearch_ko"
+name = "pg_glot"
 version = "0.0.1"
 dependencies = [
+ "glot-tokenizer",
  "pgrx",
  "pgrx-tests",
 ]
 
 [[package]]
-name = "pg_tsvector_ko"
+name = "pg_glot_hybrid"
 version = "0.0.1"
 dependencies = [
- "korean-tokenizer",
  "pgrx",
  "pgrx-tests",
 ]

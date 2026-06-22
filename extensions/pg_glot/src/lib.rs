@@ -1,4 +1,4 @@
-//! pg_tsvector_ko — PostgreSQL `korean` text search configuration (Layer A).
+//! pg_glot — PostgreSQL `korean` text search configuration (Layer A).
 //!
 //! lindera(ko-dic) 기반 커스텀 TS parser를 등록한다. `to_tsvector('korean', …)`,
 //! `ts_debug('korean', …)`, 그리고 (Layer B) pg_textsearch BM25(`text_config='korean'`)가
@@ -11,7 +11,7 @@
 //! - 입력은 UTF-8 검증 후 처리(비-UTF8 DB 인코딩이면 ereport).
 //! - panic은 pgrx `#[pg_guard]`(매크로가 자동 부착)가 ereport로 변환.
 
-use korean_tokenizer::{Analyzer, LinderaAnalyzer};
+use glot_tokenizer::{Analyzer, LinderaAnalyzer};
 use pgrx::prelude::*;
 use pgrx::Internal;
 use std::os::raw::{c_char, c_int};
@@ -29,7 +29,7 @@ static ANALYZER: OnceLock<LinderaAnalyzer> = OnceLock::new();
 fn analyzer() -> &'static LinderaAnalyzer {
     ANALYZER.get_or_init(|| {
         LinderaAnalyzer::new_ko_dic()
-            .unwrap_or_else(|e| pgrx::error!("pg_tsvector_ko: lindera ko-dic 로드 실패: {e:?}"))
+            .unwrap_or_else(|e| pgrx::error!("pg_glot: lindera ko-dic 로드 실패: {e:?}"))
     })
 }
 
@@ -49,14 +49,14 @@ struct OutTok {
 fn ko_prs_start(input: Internal, len: i32) -> Internal {
     // SAFETY: PG가 (char* input, int len)로 정규 호출. input datum은 입력 텍스트 포인터.
     let state = unsafe {
-        let datum = input.unwrap().expect("pg_tsvector_ko: null parser input");
+        let datum = input.unwrap().expect("pg_glot: null parser input");
         let ptr = datum.cast_mut_ptr::<u8>();
         let bytes = std::slice::from_raw_parts(ptr, len.max(0) as usize);
         let text = match std::str::from_utf8(bytes) {
             Ok(s) => s,
-            Err(_) => pgrx::error!(
-                "pg_tsvector_ko: 입력이 유효한 UTF-8이 아님 (DB 인코딩은 UTF8이어야 함)"
-            ),
+            Err(_) => {
+                pgrx::error!("pg_glot: 입력이 유효한 UTF-8이 아님 (DB 인코딩은 UTF8이어야 함)")
+            }
         };
         let tokens = analyzer()
             .tokenize(text)
@@ -91,11 +91,11 @@ fn ko_prs_nexttoken(mut state: Internal, t: Internal, tlen: Internal) -> Interna
                 let tok = &st.tokens[idx];
                 let t_out = t
                     .unwrap()
-                    .expect("pg_tsvector_ko: null token out-ptr")
+                    .expect("pg_glot: null token out-ptr")
                     .cast_mut_ptr::<*mut c_char>();
                 let tlen_out = tlen
                     .unwrap()
-                    .expect("pg_tsvector_ko: null tlen out-ptr")
+                    .expect("pg_glot: null tlen out-ptr")
                     .cast_mut_ptr::<c_int>();
                 // PG가 이 포인터의 바이트를 즉시 복사한다. surface는 ParserState 안에 살아있음.
                 *t_out = tok.surface.as_ptr() as *mut c_char;
@@ -113,14 +113,54 @@ fn ko_prs_nexttoken(mut state: Internal, t: Internal, tlen: Internal) -> Interna
 #[pg_extern(immutable, parallel_safe)]
 fn ko_prs_end(_state: Internal) {}
 
-/// 임베드된 한국어 사전/엔진 버전을 노출한다.
-///
-/// 사전(또는 분절 정책에 영향을 주는 엔진 버전)이 바뀌면 기존 `korean` tsvector와
-/// pg_textsearch BM25 인덱스는 stale이 된다 — **사전은 인덱스 정의의 일부**이므로
-/// REINDEX가 필요하다. 재현성 가드(docs/DESIGN.md §10).
-#[pg_extern(immutable, parallel_safe)]
-fn pg_tsvector_ko_dictionary_version() -> String {
-    korean_tokenizer::dictionary_version()
+/// `glot` 네임스페이스 — 언어무관 공통 함수. 이 확장(pg_glot)이 `glot` 스키마를
+/// 소유하고, pg_glot_hybrid(Layer B)가 그 위에 `glot.hybrid`를 더한다(스키마 공유).
+#[pg_schema]
+mod glot {
+    use pgrx::prelude::*;
+    use std::collections::HashMap;
+
+    /// RRF(Reciprocal Rank Fusion) 프리미티브 — 백엔드/스키마/언어 무관 (D6).
+    ///
+    /// 각 leg는 **순위순 id 배열**(앞이 1위). 융합 점수 = `Σ_legs 1/(k + rank)`.
+    /// (id, rank)만 받으므로 BM25/dense 외 임의 랭커·커스텀 스키마·외부 파이프라인에서
+    /// 재사용된다. NULL 불기여. 점수 내림차순(동점 id 오름차순) 결정적 정렬.
+    #[pg_extern(immutable, parallel_safe)]
+    fn rrf(
+        bm25: Vec<Option<i64>>,
+        dense: Vec<Option<i64>>,
+        k: default!(i32, 60),
+    ) -> TableIterator<'static, (name!(id, i64), name!(score, f64))> {
+        if k <= 0 {
+            error!("rrf: k must be positive (got {k})");
+        }
+        let kf = f64::from(k);
+        let mut scores: HashMap<i64, f64> = HashMap::new();
+        let mut accumulate = |leg: &[Option<i64>]| {
+            for (i, id) in leg.iter().enumerate() {
+                if let Some(id) = id {
+                    *scores.entry(*id).or_insert(0.0) += 1.0 / (kf + (i as f64 + 1.0));
+                }
+            }
+        };
+        accumulate(&bm25);
+        accumulate(&dense);
+        let mut rows: Vec<(i64, f64)> = scores.into_iter().collect();
+        rows.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.0.cmp(&b.0))
+        });
+        TableIterator::new(rows)
+    }
+
+    /// 임베드된 사전/엔진 버전(`glot.dictionary_version()`). 사전(또는 분절에 영향을
+    /// 주는 엔진 버전)이 바뀌면 기존 `korean` tsvector와 BM25 인덱스는 stale이 된다 —
+    /// **사전은 인덱스 정의의 일부**이므로 REINDEX가 필요하다(재현성 가드, §10).
+    #[pg_extern(immutable, parallel_safe)]
+    fn dictionary_version() -> String {
+        ::glot_tokenizer::dictionary_version()
+    }
 }
 
 extension_sql!(
@@ -231,7 +271,7 @@ mod tests {
     // 사전 버전 노출: 사전 변경 시 REINDEX 판단 근거(재현성, §10).
     #[pg_test]
     fn dictionary_version_exposed() {
-        let v = Spi::get_one::<String>("SELECT pg_tsvector_ko_dictionary_version()")
+        let v = Spi::get_one::<String>("SELECT glot.dictionary_version()")
             .expect("spi")
             .expect("null");
         assert!(v.contains("mecab-ko-dic"), "ko-dic 사전 식별: {v}");

@@ -1,5 +1,5 @@
 [package]
-name = "pg_tsvector_ko"
+name = "pg_glot"
 description = "Korean text search configuration (lindera-backed custom TS parser) for PostgreSQL"
 version.workspace = true
 edition.workspace = true
@@ -21,7 +21,7 @@ pg_test = []
 
 [dependencies]
 pgrx = "=0.18.0"
-korean-tokenizer = { workspace = true }
+glot-tokenizer = { workspace = true }
 
 [dev-dependencies.pgrx-tests]
 version = "=0.18.0"

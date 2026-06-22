@@ -1,11 +1,11 @@
-# pg_textsearch_ko — dev targets (pgrx). 설계: docs/DESIGN.md
+# pg_glot_hybrid — dev targets (pgrx). 설계: docs/DESIGN.md
 # 타깃 PG: pg17 (pgrx-managed). 변경: make PG_VER=pgXX ...
 PG_VER    ?= pg17
-EXT       ?= pg_tsvector_ko
+EXT       ?= pg_glot
 EXT_DIR   := extensions/$(EXT)
 # 통합 설치 대상 PostgreSQL (install-all/docker). pgrx-managed가 아닌 실제 클러스터.
 PG_CONFIG ?= pg_config
-IMAGE     ?= pg_textsearch_ko:17
+IMAGE     ?= pg_glot_hybrid:17
 
 .PHONY: unit run test schema package fmt lint help install-all docker-build licenses
 
@@ -22,7 +22,7 @@ help:
 	@echo "licenses    - 정적 링크 Rust 크레이트 라이선스 재생성 + cargo-deny 게이트"
 
 unit:
-	cargo test -p korean-tokenizer
+	cargo test -p glot-tokenizer
 
 run:
 	cd $(EXT_DIR) && cargo pgrx run $(PG_VER)

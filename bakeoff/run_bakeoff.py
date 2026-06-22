@@ -35,7 +35,7 @@ from tokenizers import MecabKoBaseline, HephaexMecabKo, Lindera  # noqa: E402
 MIRACL_DOCS = TEXTSEARCH_ROOT / "data/miracl/docs_ko_miracl.json"
 MIRACL_QUERIES = TEXTSEARCH_ROOT / "data/miracl/queries_dev.json"
 MDN_ROOT = Path("/tmp/mdn_clone/files/ko")
-OUT_DIR = Path("/Users/jaesolshin/Documents/GitHub/pg_textsearch_ko/bakeoff")
+OUT_DIR = Path("/Users/jaesolshin/Documents/GitHub/pg_glot_hybrid/bakeoff")
 
 N_MATCH_SAMPLE = 800   # M1 토큰 일치율 샘플 수 (코퍼스당)
 

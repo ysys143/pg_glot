@@ -1,6 +1,6 @@
 [package]
-name = "korean-tokenizer"
-description = "Korean morphological tokenizer (lindera + ko-dic) — reusable engine for pg_tsvector_ko"
+name = "glot-tokenizer"
+description = "Korean morphological tokenizer (lindera + ko-dic) — reusable engine for pg_glot"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

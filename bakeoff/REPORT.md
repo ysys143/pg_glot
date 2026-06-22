@@ -1,6 +1,6 @@
 # 한국어 형태소 분석기 Bake-off 결과
 
-**목적**: `pg_textsearch_ko` 확장의 한국어 형태소 분석 백엔드를 데이터로 결정하기 위해,
+**목적**: `pg_glot_hybrid` 확장의 한국어 형태소 분석 백엔드를 데이터로 결정하기 위해,
 3개 토크나이저를 같은 코퍼스에 돌려 ①토큰 일치율(vs 베이스라인) ②BM25 NDCG를 측정한다.
 
 - 실행일: 2026-06-19
@@ -125,7 +125,7 @@ NDCG를 실측으로 보였기 때문이다. 다만 확장 통합 단계에서 l
 
 ```bash
 # 전체 자동 재현
-bash /Users/jaesolshin/Documents/GitHub/pg_textsearch_ko/bakeoff/reproduce.sh
+bash /Users/jaesolshin/Documents/GitHub/pg_glot_hybrid/bakeoff/reproduce.sh
 
 # 또는 단계별:
 VENV_PY=/Users/jaesolshin/Documents/GitHub/textsearch/.venv/bin/python
@@ -147,7 +147,7 @@ cargo run --release -p mecab-ko-dict-builder -- build \
     --output /tmp/hephaex_mecab_ko/data/dict-output
 
 # 4) bake-off 측정
-cd /Users/jaesolshin/Documents/GitHub/pg_textsearch_ko/bakeoff
+cd /Users/jaesolshin/Documents/GitHub/pg_glot_hybrid/bakeoff
 $VENV_PY run_bakeoff.py
 ```
 
