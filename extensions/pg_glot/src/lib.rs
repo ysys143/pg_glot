@@ -20,9 +20,7 @@ use std::sync::OnceLock;
 ::pgrx::pg_module_magic!(name, version);
 
 /// PostgreSQL 기본 파서(prsd_lextype) 토큰 타입 ID.
-const ASCIIWORD: usize = 1; // ASCII 알파벳 토큰 → "asciiword" (english_stem 매핑)
-const WORD: usize = 2; // 한글/한자/가나 형태소 → "word"
-const NUMWORD: usize = 3; // ASCII 숫자 포함 토큰 → "numword"
+const WORD: usize = 2; // 내용어 형태소(한글/한자/가나/라틴/숫자) → "word"
 const BLANK: usize = 12; // 공백/기호/기능어 → "blank"
 
 /// 언어별 lindera 분석기: 백엔드 프로세스당 1회 로드(불변 공유). `tokenize`가 `&self`.
@@ -85,20 +83,12 @@ fn prs_start_impl(analyzer: &LinderaAnalyzer, input: Internal, len: i32) -> Inte
             .tokenize(text)
             .into_iter()
             .map(|t| {
-                // 기능어(POS 기준)는 blank. 내용어는 토큰 종류로 세분: ASCII 알파벳→
-                // asciiword(english_stem), ASCII 숫자→numword, 한글/한자/가나→word.
-                // 세분해야 config의 ADD MAPPING(asciiword→english_stem)이 적용된다.
-                let lextype = if !lang.is_content_pos(t.pos.as_deref()) {
-                    BLANK
-                } else if t.surface.is_ascii() {
-                    if t.surface.bytes().any(|b| b.is_ascii_alphabetic()) {
-                        ASCIIWORD
-                    } else if t.surface.bytes().any(|b| b.is_ascii_digit()) {
-                        NUMWORD
-                    } else {
-                        BLANK
-                    }
-                } else if t.surface.chars().any(char::is_alphanumeric) {
+                // 내용어(POS 기준)면 word, 기능어·기호·공백은 blank. english_stem(asciiword
+                // 분리)은 CJK 라틴(고유명사 음역)을 과도하게 stem해 해로워(측정 ja −2.5%p,
+                // 라틴 33%) 전부 simple 매핑으로 되돌렸다 → 토큰 종류 세분 불필요.
+                let lextype = if lang.is_content_pos(t.pos.as_deref())
+                    && t.surface.chars().any(char::is_alphanumeric)
+                {
                     WORD
                 } else {
                     BLANK
@@ -227,9 +217,8 @@ COMMENT ON TEXT SEARCH PARSER korean IS 'Korean morphological parser (lindera + 
 CREATE TEXT SEARCH CONFIGURATION korean (PARSER = korean);
 COMMENT ON TEXT SEARCH CONFIGURATION korean IS 'Korean text search configuration (lindera)';
 ALTER TEXT SEARCH CONFIGURATION korean ADD MAPPING FOR
-    word, hword, hword_part, numword, numhword, hword_numpart WITH simple;
-ALTER TEXT SEARCH CONFIGURATION korean ADD MAPPING FOR
-    asciiword, asciihword, hword_asciipart WITH english_stem;
+    word, hword, hword_part, numword, numhword, hword_numpart,
+    asciiword, asciihword, hword_asciipart WITH simple;
 "#,
     name = "korean_ts_config",
     requires = [ko_prs_start, glot_prs_nexttoken, glot_prs_end],
@@ -246,9 +235,8 @@ COMMENT ON TEXT SEARCH PARSER japanese IS 'Japanese morphological parser (linder
 CREATE TEXT SEARCH CONFIGURATION japanese (PARSER = japanese);
 COMMENT ON TEXT SEARCH CONFIGURATION japanese IS 'Japanese text search configuration (lindera)';
 ALTER TEXT SEARCH CONFIGURATION japanese ADD MAPPING FOR
-    word, hword, hword_part, numword, numhword, hword_numpart WITH simple;
-ALTER TEXT SEARCH CONFIGURATION japanese ADD MAPPING FOR
-    asciiword, asciihword, hword_asciipart WITH english_stem;
+    word, hword, hword_part, numword, numhword, hword_numpart,
+    asciiword, asciihword, hword_asciipart WITH simple;
 "#,
     name = "japanese_ts_config",
     requires = [ja_prs_start, glot_prs_nexttoken, glot_prs_end],
@@ -265,9 +253,8 @@ COMMENT ON TEXT SEARCH PARSER chinese IS 'Chinese word-segmentation parser (lind
 CREATE TEXT SEARCH CONFIGURATION chinese (PARSER = chinese);
 COMMENT ON TEXT SEARCH CONFIGURATION chinese IS 'Chinese text search configuration (lindera)';
 ALTER TEXT SEARCH CONFIGURATION chinese ADD MAPPING FOR
-    word, hword, hword_part, numword, numhword, hword_numpart WITH simple;
-ALTER TEXT SEARCH CONFIGURATION chinese ADD MAPPING FOR
-    asciiword, asciihword, hword_asciipart WITH english_stem;
+    word, hword, hword_part, numword, numhword, hword_numpart,
+    asciiword, asciihword, hword_asciipart WITH simple;
 "#,
     name = "chinese_ts_config",
     requires = [zh_prs_start, glot_prs_nexttoken, glot_prs_end],
