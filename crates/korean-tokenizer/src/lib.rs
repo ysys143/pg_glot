@@ -18,8 +18,11 @@ use lindera::tokenizer::Tokenizer;
 /// 임베드 사전이 바뀌면 이 상수를 함께 갱신할 것.
 pub const KO_DIC_VERSION: &str = "mecab-ko-dic-2.1.1-20180720";
 
-/// 분절에 영향을 주는 lindera 엔진 버전(Cargo.toml `lindera = "3.0"`).
-pub const LINDERA_VERSION: &str = "3.0";
+/// 분절에 영향을 주는 lindera 엔진 버전. Cargo.toml의 exact 핀(`lindera = "=3.0.7"`)과
+/// 반드시 일치해야 한다 — 핀과 이 상수는 함께 움직인다(`lindera_constant_matches_cargo_lock`
+/// 테스트가 Cargo.lock 해석 버전과의 드리프트를 하드 실패로 막는다). 버전을 올리려면
+/// 먼저 분절을 재검증한 뒤 핀과 이 상수를 동시에 갱신할 것.
+pub const LINDERA_VERSION: &str = "3.0.7";
 
 /// 임베드된 사전 + 엔진의 버전 식별자.
 ///
@@ -178,5 +181,45 @@ mod tests {
         assert!(v.contains("mecab-ko-dic"), "ko-dic 사전 식별 포함: {v}");
         assert!(v.contains("2.1.1-20180720"), "사전 버전 포함: {v}");
         assert!(v.contains("lindera"), "엔진 식별 포함: {v}");
+    }
+
+    /// 워크스페이스 `Cargo.lock`에서 실제로 해석된 lindera 패키지 버전을 추출.
+    /// `[[package]]` 블록 중 `name = "lindera"`인 것의 `version = "..."`를 반환한다.
+    fn locked_lindera_version() -> String {
+        // CARGO_MANIFEST_DIR = crates/korean-tokenizer → ../../ = 워크스페이스 루트.
+        let lock_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock");
+        let lock = std::fs::read_to_string(lock_path)
+            .unwrap_or_else(|e| panic!("Cargo.lock 읽기 실패({lock_path}): {e}"));
+
+        let mut in_lindera = false;
+        for line in lock.lines() {
+            let trimmed = line.trim();
+            if trimmed == "[[package]]" {
+                in_lindera = false; // 새 패키지 블록 시작 → 플래그 리셋.
+            } else if trimmed == r#"name = "lindera""# {
+                in_lindera = true;
+            } else if in_lindera {
+                if let Some(rest) = trimmed.strip_prefix("version = \"") {
+                    if let Some(ver) = rest.strip_suffix('"') {
+                        return ver.to_string();
+                    }
+                }
+            }
+        }
+        panic!("Cargo.lock에서 lindera 패키지의 version을 찾지 못함");
+    }
+
+    /// 손으로 유지하는 `LINDERA_VERSION` 상수가 Cargo.lock의 실제 해석 버전과
+    /// 드리프트하면 큰 소리로 실패시킨다 — "의존성 올리고 상수 깜빡"을 하드 실패로.
+    /// lindera는 Cargo.toml에서 `=3.0.7`로 핀(exact)되어 있고, 핀과 이 상수는
+    /// 반드시 함께 움직여야 한다(버전을 올리면 분절 재검증 후 상수도 갱신).
+    #[test]
+    fn lindera_constant_matches_cargo_lock() {
+        let locked = locked_lindera_version();
+        assert_eq!(
+            locked, LINDERA_VERSION,
+            "LINDERA_VERSION 상수({LINDERA_VERSION})와 Cargo.lock 해석 버전({locked})이 \
+             불일치 — lindera 핀을 올렸다면 LINDERA_VERSION 상수도 갱신하고 분절을 재검증할 것"
+        );
     }
 }
