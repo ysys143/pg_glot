@@ -14,10 +14,48 @@
 //!   - `pg_textsearch`는 `shared_preload_libraries` 등록 필요 → 테스트는 아래
 //!     `pg_test::postgresql_conf_options()`로 주입한다.
 
+use pgrx::prelude::*;
+use std::collections::HashMap;
+
 ::pgrx::pg_module_magic!(name, version);
 
-// 행동(ko_rrf, ko_search_hybrid)은 후속 TDD 커밋에서 추가한다.
-// 이 커밋은 구조적 스캐폴딩(확장 로드 + 의존 체인 + 테스트 conf 훅)만 수립한다.
+/// RRF(Reciprocal Rank Fusion) 프리미티브 — 백엔드/스키마/언어 무관 (D6).
+///
+/// 각 leg는 **순위순 id 배열**(앞이 1위)이다. 융합 점수 = `Σ_legs 1/(k + rank)`.
+/// (id, rank) 리스트만 받으므로 BM25/dense 외 임의의 랭커, 커스텀 스키마, 외부
+/// 파이프라인(pg_aidb)에서도 그대로 재사용된다. NULL 요소는 기여하지 않는다.
+///
+/// 결과는 점수 내림차순(동점은 id 오름차순)으로 결정적 정렬된다.
+#[pg_extern(immutable, parallel_safe)]
+fn ko_rrf(
+    bm25: Vec<Option<i64>>,
+    dense: Vec<Option<i64>>,
+    k: default!(i32, 60),
+) -> TableIterator<'static, (name!(id, i64), name!(score, f64))> {
+    if k <= 0 {
+        error!("ko_rrf: k must be positive (got {k})");
+    }
+    let kf = f64::from(k);
+    let mut scores: HashMap<i64, f64> = HashMap::new();
+    let mut accumulate = |leg: &[Option<i64>]| {
+        for (i, id) in leg.iter().enumerate() {
+            if let Some(id) = id {
+                // rank는 1-based(배열 위치). NULL도 위치는 차지하나 점수엔 불기여.
+                *scores.entry(*id).or_insert(0.0) += 1.0 / (kf + (i as f64 + 1.0));
+            }
+        }
+    };
+    accumulate(&bm25);
+    accumulate(&dense);
+
+    let mut rows: Vec<(i64, f64)> = scores.into_iter().collect();
+    rows.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0))
+    });
+    TableIterator::new(rows)
+}
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
@@ -54,6 +92,70 @@ mod tests {
                 .expect("spi")
                 .expect("null");
         assert_eq!(hit, 1, "'형태소' 질의는 doc 1을 최상위로 반환해야 함");
+    }
+
+    // ── ko_rrf: 백엔드/스키마 무관 fusion 프리미티브 (D6) ──────────────────
+
+    /// 두 leg 모두에 등장하는 id는 양쪽 기여(1/(k+rank))로 최상위 점수를 받는다.
+    #[pg_test]
+    fn ko_rrf_ranks_shared_id_highest() {
+        // bm25 순위: 10,20,30 / dense 순위: 20,40 → id 20만 양쪽 등장
+        let top = Spi::get_one::<i64>(
+            "SELECT id FROM ko_rrf(ARRAY[10,20,30]::bigint[], ARRAY[20,40]::bigint[], 60) \
+             ORDER BY score DESC, id LIMIT 1",
+        )
+        .expect("spi")
+        .expect("null");
+        assert_eq!(top, 20, "양쪽 leg에 등장한 id 20이 최상위여야 함");
+    }
+
+    /// 단일 leg, rank=1 → score = 1/(k+1).
+    #[pg_test]
+    fn ko_rrf_score_formula() {
+        let s = Spi::get_one::<f64>(
+            "SELECT score FROM ko_rrf(ARRAY[10]::bigint[], ARRAY[]::bigint[], 60)",
+        )
+        .expect("spi")
+        .expect("null");
+        assert!((s - 1.0 / 61.0).abs() < 1e-9, "1/(60+1) 기대, 실제 {s}");
+    }
+
+    /// 누락 id는 그 leg에 기여하지 않는다(합산 정확성): bm25 rank2 + dense rank1.
+    #[pg_test]
+    fn ko_rrf_sums_per_leg_ranks() {
+        // id 20: bm25 rank2(=1/62) + dense rank1(=1/61)
+        let s = Spi::get_one::<f64>(
+            "SELECT score FROM ko_rrf(ARRAY[10,20,30]::bigint[], ARRAY[20,40]::bigint[], 60) \
+             WHERE id = 20",
+        )
+        .expect("spi")
+        .expect("null");
+        let expected = 1.0 / 62.0 + 1.0 / 61.0;
+        assert!((s - expected).abs() < 1e-9, "기대 {expected}, 실제 {s}");
+    }
+
+    /// 빈 leg 둘 → 0 row.
+    #[pg_test]
+    fn ko_rrf_empty_legs_yield_no_rows() {
+        let n = Spi::get_one::<i64>(
+            "SELECT count(*) FROM ko_rrf(ARRAY[]::bigint[], ARRAY[]::bigint[], 60)",
+        )
+        .expect("spi")
+        .expect("null");
+        assert_eq!(n, 0);
+    }
+
+    /// k 생략 시 기본값 60.
+    #[pg_test]
+    fn ko_rrf_default_k_is_60() {
+        let s =
+            Spi::get_one::<f64>("SELECT score FROM ko_rrf(ARRAY[10]::bigint[], ARRAY[]::bigint[])")
+                .expect("spi")
+                .expect("null");
+        assert!(
+            (s - 1.0 / 61.0).abs() < 1e-9,
+            "기본 k=60 기대, 실제 score {s}"
+        );
     }
 }
 
