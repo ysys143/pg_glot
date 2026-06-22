@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 # embed-ko-dic feature가 lindera-ko-dic/embed-ko-dic을 전파 → ko-dic 바이너리 임베드(외부 사전 0).
-lindera = { version = "3.0", features = ["embed-ko-dic"] }
+# 재현성: 엔진 패치(3.0.x)가 분절을 바꿀 수 있으므로 exact 핀(=3.0.7). 버전을 올리면
+# 분절을 재검증하고 src/lib.rs의 LINDERA_VERSION 상수도 함께 갱신할 것(핀과 상수는 동행).
+lindera = { version = "=3.0.7", features = ["embed-ko-dic"] }
 
 [dev-dependencies]
