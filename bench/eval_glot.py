@@ -41,8 +41,15 @@ def recall_at_k(relevant: list[str], retrieved: list[str], k: int = 10) -> float
     return hits / len(rel) if rel else 0.0
 
 
-def evaluate(conn, lang: str, corpus: list[dict], queries: list[dict], k: int = 10) -> dict:
-    cfg = f"public.{lang}"
+def evaluate(
+    conn,
+    lang: str,
+    corpus: list[dict],
+    queries: list[dict],
+    k: int = 10,
+    config: str | None = None,
+) -> dict:
+    cfg = config or f"public.{lang}"
     with conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS eval_docs")
         cur.execute("CREATE TABLE eval_docs(id text primary key, body text)")
@@ -89,6 +96,7 @@ def main() -> int:
         default="host=localhost port=5432 user=postgres password=pw dbname=postgres",
     )
     ap.add_argument("-k", type=int, default=10)
+    ap.add_argument("--config", default=None, help="text_config 오버라이드 (기본 public.{lang})")
     a = ap.parse_args()
 
     with open(a.corpus, encoding="utf-8") as f:
@@ -97,7 +105,7 @@ def main() -> int:
         queries = json.load(f)
 
     with psycopg.connect(a.dsn, autocommit=False) as conn:
-        res = evaluate(conn, a.lang, corpus, queries, a.k)
+        res = evaluate(conn, a.lang, corpus, queries, a.k, a.config)
     print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0
 
