@@ -4,11 +4,21 @@ This extension family is licensed under the PostgreSQL License (see LICENSE).
 It builds on and/or depends on the following third-party components.
 
 [Embedded — Rust crates compiled into pg_glot / pg_glot_hybrid]
-  lindera            — MIT OR Apache-2.0. Korean/CJK morphological analysis engine
+  lindera            — MIT OR Apache-2.0. CJK morphological analysis engine
                        (forked from kuromoji-rs). https://github.com/lindera/lindera
-  lindera-ko-dic     — Apache License 2.0. ko-dic dictionary data, derived from
-                       mecab-ko-dic (eunjeon / 은전한닢) and the 21st Century Sejong
-                       Project corpus. Embedded via the `embed-ko-dic` feature.
+
+  Per-language embedded dictionaries (crate code = MIT; the *dictionary data* has its
+  own license, reproduced below — relevant when bundling, e.g. the Docker image).
+  Each is embedded only when its feature is enabled (default: all three).
+  korean   — lindera-ko-dic.     Dictionary data: mecab-ko-dic (eunjeon / 은전한닢) +
+             21st Century Sejong corpus, Apache License 2.0. feature `korean`.
+  japanese — lindera-ipadic.     Dictionary data: mecab-ipadic, BSD-3-Clause (NAIST).
+             feature `japanese`.
+  chinese  — lindera-cc-cedict.  Dictionary data: CC-CEDICT, **CC-BY-SA 3.0** (MDBG) —
+             share-alike applies to the dictionary data itself (mere aggregation with
+             our permissive code; data redistribution must keep the CC-BY-SA notice).
+             feature `chinese`.
+
   (+ all other statically-linked crates: pgrx, serde, etc. — permissive MIT/Apache/
    BSD/ISC. The complete, authoritative list with full license/copyright texts is in
    THIRD_PARTY_LICENSES/RUST_CRATES.html, generated from Cargo.lock by cargo-about and

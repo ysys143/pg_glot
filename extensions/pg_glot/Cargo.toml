@@ -1,6 +1,6 @@
 [package]
 name = "pg_glot"
-description = "Korean text search configuration (lindera-backed custom TS parser) for PostgreSQL"
+description = "CJK (Korean/Japanese/Chinese) text search configurations (lindera-backed custom TS parsers) for PostgreSQL"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,18 +10,23 @@ repository.workspace = true
 crate-type = ["cdylib", "lib"]
 
 [features]
-default = ["pg17"]
+# pg 메이저 + 언어. default는 pg17 + CJK 셋 다. 언어를 줄이려면
+#   cargo pgrx test pg17 --no-default-features --features "pg17 korean"
+default = ["pg17", "korean", "japanese", "chinese"]
 pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
 pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
 pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
 pg16 = ["pgrx/pg16", "pgrx-tests/pg16"]
 pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
 pg18 = ["pgrx/pg18", "pgrx-tests/pg18"]
+korean = ["glot-tokenizer/korean"]
+japanese = ["glot-tokenizer/japanese"]
+chinese = ["glot-tokenizer/chinese"]
 pg_test = []
 
 [dependencies]
 pgrx = "=0.18.0"
-glot-tokenizer = { workspace = true }
+glot-tokenizer = { workspace = true, default-features = false }
 
 [dev-dependencies.pgrx-tests]
 version = "=0.18.0"

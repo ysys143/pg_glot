@@ -1,15 +1,24 @@
 [package]
 name = "glot-tokenizer"
-description = "Korean morphological tokenizer (lindera + ko-dic) — reusable engine for pg_glot"
+description = "CJK (Korean/Japanese/Chinese) morphological tokenizer (lindera) — reusable engine for pg_glot"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# 언어별 임베드 사전. default는 CJK 셋 다(모두 지원). 줄이려면
+#   cargo build --no-default-features --features korean
+# 처럼 켤 것. 각 feature가 lindera 임베드 사전을 전파(외부 사전 설치 0).
+default = ["korean", "japanese", "chinese"]
+korean = ["lindera/embed-ko-dic"]      # ko-dic (mecab-ko-dic, Apache-2.0)
+japanese = ["lindera/embed-ipadic"]    # IPADIC (mecab-ipadic)
+chinese = ["lindera/embed-cc-cedict"]  # CC-CEDICT
+
 [dependencies]
-# embed-ko-dic feature가 lindera-ko-dic/embed-ko-dic을 전파 → ko-dic 바이너리 임베드(외부 사전 0).
 # 재현성: 엔진 패치(3.0.x)가 분절을 바꿀 수 있으므로 exact 핀(=3.0.7). 버전을 올리면
 # 분절을 재검증하고 src/lib.rs의 LINDERA_VERSION 상수도 함께 갱신할 것(핀과 상수는 동행).
-lindera = { version = "=3.0.7", features = ["embed-ko-dic"] }
+# 임베드 사전 feature는 위 [features]가 전파한다.
+lindera = { version = "=3.0.7", default-features = false }
 
 [dev-dependencies]
