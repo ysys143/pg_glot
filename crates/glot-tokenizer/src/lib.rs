@@ -79,6 +79,34 @@ impl Lang {
         };
         format!("{dic} (lindera {LINDERA_VERSION}, {feat})")
     }
+
+    /// POS 태그가 색인 대상(내용어)인가. 기능어(조사/어미/조동사/기호)는 false → 색인
+    /// 제외(BM25 노이즈 감소). POS가 없으면(zh cc-cedict는 품사 미제공) 필터 불가 →
+    /// 보수적으로 모두 내용어 취급(true).
+    #[must_use]
+    pub fn is_content_pos(self, pos: Option<&str>) -> bool {
+        let pos = match pos {
+            Some(p) => p,
+            None => return true,
+        };
+        let _ = pos;
+        match self {
+            // ko: POS 필터가 NDCG를 개선하지 않아(MIRACL 측정 0.6058→0.5983) 비활성.
+            // lindera 형태소 분리가 이미 어간을 뽑고, BM25 IDF가 흔한 기능어를 눌러 명시적
+            // 제거의 순이득이 없다(research 갭의 원인은 POS가 아닌 토크나이저/스테밍).
+            #[cfg(feature = "korean")]
+            Lang::Korean => true,
+            // ipadic: 助詞(조사)/助動詞(조동사)/記号(기호) 등 제외 → recall 개선(측정 +1.5%p).
+            #[cfg(feature = "japanese")]
+            Lang::Japanese => !matches!(
+                pos,
+                "助詞" | "助動詞" | "記号" | "フィラー" | "感動詞" | "接続詞"
+            ),
+            // cc-cedict는 POS 미제공('*') → 필터 불가(전부 색인). stopword는 후속.
+            #[cfg(feature = "chinese")]
+            Lang::Chinese => true,
+        }
+    }
 }
 
 /// 하위호환: 인자 없는 사전버전 = korean. `pg_glot`이 `glot.dictionary_version()`으로 노출.
@@ -108,6 +136,7 @@ pub trait Analyzer: Send + Sync {
 /// lindera 기반 분석기(언어=`Lang`). 사전 로드는 무겁다 — 프로세스당 1회 권장.
 pub struct LinderaAnalyzer {
     tokenizer: Tokenizer,
+    lang: Lang,
 }
 
 impl LinderaAnalyzer {
@@ -117,7 +146,14 @@ impl LinderaAnalyzer {
         let segmenter = Segmenter::new(Mode::Normal, dictionary, None);
         Ok(Self {
             tokenizer: Tokenizer::new(segmenter),
+            lang,
         })
+    }
+
+    /// 이 분석기의 언어(POS 필터 등 언어별 처리에 사용).
+    #[must_use]
+    pub fn lang(&self) -> Lang {
+        self.lang
     }
 
     /// 하위호환: ko-dic 분석기 = `new(Lang::Korean)`.
@@ -327,5 +363,45 @@ mod tests {
         assert!(Lang::Japanese.dictionary_version().contains("ipadic"));
         #[cfg(feature = "chinese")]
         assert!(Lang::Chinese.dictionary_version().contains("CC-CEDICT"));
+    }
+
+    #[test]
+    fn is_content_pos_filters_functional_words() {
+        // ko: POS 필터 비활성(측정 결과 무효) → 조사를 포함해 모든 POS를 색인(true).
+        #[cfg(feature = "korean")]
+        {
+            assert!(Lang::Korean.is_content_pos(Some("NNG")));
+            assert!(Lang::Korean.is_content_pos(Some("JKO")));
+        }
+        #[cfg(feature = "japanese")]
+        {
+            assert!(Lang::Japanese.is_content_pos(Some("名詞")), "명사=내용어");
+            assert!(Lang::Japanese.is_content_pos(Some("動詞")), "동사=내용어");
+            assert!(!Lang::Japanese.is_content_pos(Some("助詞")), "조사=기능어");
+            assert!(
+                !Lang::Japanese.is_content_pos(Some("助動詞")),
+                "조동사=기능어"
+            );
+        }
+        // zh: cc-cedict POS 미제공('*') → 필터 불가, 전부 색인.
+        #[cfg(feature = "chinese")]
+        assert!(Lang::Chinese.is_content_pos(Some("*")));
+        // POS None → 보수적 색인.
+        #[cfg(feature = "korean")]
+        assert!(Lang::Korean.is_content_pos(None));
+    }
+
+    #[test]
+    fn analyzer_exposes_lang() {
+        #[cfg(feature = "korean")]
+        assert_eq!(
+            LinderaAnalyzer::new(Lang::Korean).unwrap().lang(),
+            Lang::Korean
+        );
+        #[cfg(feature = "japanese")]
+        assert_eq!(
+            LinderaAnalyzer::new(Lang::Japanese).unwrap().lang(),
+            Lang::Japanese
+        );
     }
 }
