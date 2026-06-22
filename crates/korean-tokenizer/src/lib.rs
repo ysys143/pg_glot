@@ -12,6 +12,25 @@ use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
 use lindera::tokenizer::Tokenizer;
 
+/// 임베드된 ko-dic 사전 버전(lindera-ko-dic 3.0.x가 번들한 mecab-ko-dic).
+///
+/// lindera-ko-dic 3.0.7 `build.rs`/`NOTICE.txt`로 확인된 값. 의존성을 올려
+/// 임베드 사전이 바뀌면 이 상수를 함께 갱신할 것.
+pub const KO_DIC_VERSION: &str = "mecab-ko-dic-2.1.1-20180720";
+
+/// 분절에 영향을 주는 lindera 엔진 버전(Cargo.toml `lindera = "3.0"`).
+pub const LINDERA_VERSION: &str = "3.0";
+
+/// 임베드된 사전 + 엔진의 버전 식별자.
+///
+/// 사전(또는 분절 정책에 영향을 주는 엔진 버전)이 바뀌면 기존 tsvector/BM25
+/// 인덱스는 stale이 된다 — **사전은 인덱스 정의의 일부**이므로 REINDEX가 필요하다.
+/// `pg_tsvector_ko`는 이를 `pg_tsvector_ko_dictionary_version()` SQL 함수로 노출한다.
+#[must_use]
+pub fn dictionary_version() -> String {
+    format!("{KO_DIC_VERSION} (lindera {LINDERA_VERSION}, embed-ko-dic)")
+}
+
 /// 한 형태소 토큰. `byte_start`/`byte_end`는 입력 UTF-8 바이트 오프셋
 /// (PostgreSQL TS parser 토큰 생성에 필요).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,5 +169,14 @@ mod tests {
         let a = analyzer();
         let text = "검색 품질 평가 재현성";
         assert_eq!(a.tokenize(text), a.tokenize(text));
+    }
+
+    // 사전 버전 식별자: 사전은 인덱스 정의의 일부 → 재현성 가드.
+    #[test]
+    fn dictionary_version_identifies_kodic() {
+        let v = dictionary_version();
+        assert!(v.contains("mecab-ko-dic"), "ko-dic 사전 식별 포함: {v}");
+        assert!(v.contains("2.1.1-20180720"), "사전 버전 포함: {v}");
+        assert!(v.contains("lindera"), "엔진 식별 포함: {v}");
     }
 }

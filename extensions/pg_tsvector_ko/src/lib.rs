@@ -69,7 +69,10 @@ fn ko_prs_start(input: Internal, len: i32) -> Internal {
                 } else {
                     BLANK
                 };
-                OutTok { surface: t.surface, lextype }
+                OutTok {
+                    surface: t.surface,
+                    lextype,
+                }
             })
             .collect();
         ParserState { tokens, idx: 0 }
@@ -109,6 +112,16 @@ fn ko_prs_nexttoken(mut state: Internal, t: Internal, tlen: Internal) -> Interna
 /// `prsend(internal state) -> void`. 상태는 memory context 삭제 시 자동 정리.
 #[pg_extern(immutable, parallel_safe)]
 fn ko_prs_end(_state: Internal) {}
+
+/// 임베드된 한국어 사전/엔진 버전을 노출한다.
+///
+/// 사전(또는 분절 정책에 영향을 주는 엔진 버전)이 바뀌면 기존 `korean` tsvector와
+/// pg_textsearch BM25 인덱스는 stale이 된다 — **사전은 인덱스 정의의 일부**이므로
+/// REINDEX가 필요하다. 재현성 가드(docs/DESIGN.md §10).
+#[pg_extern(immutable, parallel_safe)]
+fn pg_tsvector_ko_dictionary_version() -> String {
+    korean_tokenizer::dictionary_version()
+}
 
 extension_sql!(
     r#"
@@ -170,9 +183,10 @@ mod tests {
     // ts_debug가 한국어 형태소를 'word' 타입으로 라벨해야 한다.
     #[pg_test]
     fn ts_debug_labels_korean_as_word() {
-        let alias = Spi::get_one::<String>("SELECT alias FROM ts_debug('korean', '형태소') LIMIT 1")
-            .expect("spi")
-            .expect("null");
+        let alias =
+            Spi::get_one::<String>("SELECT alias FROM ts_debug('korean', '형태소') LIMIT 1")
+                .expect("spi")
+                .expect("null");
         assert_eq!(alias, "word", "한국어 형태소는 'word' 타입이어야 함");
     }
 
@@ -212,6 +226,16 @@ mod tests {
             let n = lexeme_count("검색 품질 평가").expect("null");
             assert!(n >= 1);
         }
+    }
+
+    // 사전 버전 노출: 사전 변경 시 REINDEX 판단 근거(재현성, §10).
+    #[pg_test]
+    fn dictionary_version_exposed() {
+        let v = Spi::get_one::<String>("SELECT pg_tsvector_ko_dictionary_version()")
+            .expect("spi")
+            .expect("null");
+        assert!(v.contains("mecab-ko-dic"), "ko-dic 사전 식별: {v}");
+        assert!(v.contains("2.1.1-20180720"), "사전 버전: {v}");
     }
 }
 
