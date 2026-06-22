@@ -57,6 +57,72 @@ fn ko_rrf(
     TableIterator::new(rows)
 }
 
+// ko_search_hybrid — pgvector 편의 어댑터 (D6).
+//
+// BM25 leg(`text_col <@> q_text`)와 dense leg(`vec_col <=> q_vec`)를 각각 인덱스
+// top-k로 뽑아 거리순 id 배열을 만들고, ko_rrf로 융합해 상위 n을 돌려준다.
+// 동적 SQL이지만 식별자는 `format('%I')`, 테이블은 `regclass`(검증된 OID)로만
+// 들어가므로 SQL injection 면역. 권한은 invoker(SECURITY DEFINER 회피, §10).
+// `<@>`/`<=>`/`ko_rrf` 해석을 위해 search_path에 public을 포함하되 고정한다.
+extension_sql!(
+    r#"
+CREATE FUNCTION ko_search_hybrid(
+    rel       regclass,
+    key_col   text,
+    text_col  text,
+    vec_col   text,
+    q_text    text,
+    q_vec     vector,
+    k         integer DEFAULT 60,
+    per_leg   integer DEFAULT 60,
+    n         integer DEFAULT 10
+) RETURNS TABLE(id bigint, score double precision)
+LANGUAGE plpgsql
+STABLE
+PARALLEL SAFE
+SET search_path = pg_catalog, public, pg_temp
+AS $func$
+DECLARE
+    bm25_ids  bigint[];
+    dense_ids bigint[];
+BEGIN
+    -- BM25 leg: korean config로 색인된 text_col을 q_text로 스코어, 인덱스 top-k.
+    -- pg_textsearch `<@>`는 plain ORDER BY+LIMIT(인덱스 스캔)에서만 동작하고,
+    -- planner hook은 질의가 **리터럴**일 때만 인덱스를 매칭하므로 q_text는 %L
+    -- (quote_literal, injection 안전)로 인라인한다. 순위는 정렬 결과의 순번.
+    EXECUTE format(
+        'SELECT array_agg(k ORDER BY ord) FROM ('
+        '  SELECT k, row_number() OVER () AS ord FROM ('
+        '    SELECT (%1$I)::bigint AS k FROM %2$s'
+        '    ORDER BY (%3$I <@> %4$L) LIMIT %5$L) t) u',
+        key_col, rel::text, text_col, q_text, per_leg
+    ) INTO bm25_ids;
+
+    -- dense leg: pgvector 거리, 인덱스 top-k (동일 순위화 패턴).
+    EXECUTE format(
+        'SELECT array_agg(k ORDER BY ord) FROM ('
+        '  SELECT k, row_number() OVER () AS ord FROM ('
+        '    SELECT (%1$I)::bigint AS k FROM %2$s'
+        '    ORDER BY (%3$I <=> $1) LIMIT $2) t) u',
+        key_col, rel::text, vec_col
+    ) INTO dense_ids USING q_vec, per_leg;
+
+    RETURN QUERY
+        SELECT r.id, r.score
+        FROM ko_rrf(
+                 COALESCE(bm25_ids,  ARRAY[]::bigint[]),
+                 COALESCE(dense_ids, ARRAY[]::bigint[]),
+                 k) AS r
+        LIMIT n;
+END;
+$func$;
+COMMENT ON FUNCTION ko_search_hybrid(regclass,text,text,text,text,vector,integer,integer,integer)
+    IS 'Korean hybrid search: BM25(<@>, korean config) + dense(<=>) fused by ko_rrf';
+"#,
+    name = "ko_search_hybrid",
+    requires = [ko_rrf],
+);
+
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
 mod tests {
@@ -156,6 +222,49 @@ mod tests {
             (s - 1.0 / 61.0).abs() < 1e-9,
             "기본 k=60 기대, 실제 score {s}"
         );
+    }
+
+    // ── ko_search_hybrid: pgvector 편의 어댑터 (D6) ────────────────────────
+
+    /// 테스트용 한국어 문서 테이블 + BM25 인덱스 + 벡터.
+    fn setup_hybrid_table() {
+        Spi::run(
+            "CREATE TEMP TABLE hdocs(id bigint primary key, body text, emb vector(3)); \
+             INSERT INTO hdocs VALUES \
+               (1,'한국어 형태소 분석 테스트','[1,0,0]'), \
+               (2,'서울 맛집 추천 정보','[0,1,0]'), \
+               (3,'형태소 분석기 비교 연구','[0,0,1]'); \
+             CREATE INDEX hdocs_bm25 ON hdocs \
+                 USING bm25(body) WITH (text_config='public.korean');",
+        )
+        .expect("하이브리드 테이블 셋업 실패");
+    }
+
+    /// BM25 leg('형태소' → 1,3)와 dense leg([1,0,0] → 1 최근접)를 융합하면
+    /// 양쪽에서 강한 doc 1이 최상위가 된다(end-to-end BM25 라운드트립 + 융합).
+    #[pg_test]
+    fn ko_search_hybrid_fuses_bm25_and_dense() {
+        setup_hybrid_table();
+        let top = Spi::get_one::<i64>(
+            "SELECT id FROM ko_search_hybrid('hdocs','id','body','emb','형태소','[1,0,0]'::vector) \
+             LIMIT 1",
+        )
+        .expect("spi")
+        .expect("null");
+        assert_eq!(top, 1, "BM25+dense 양쪽 강한 doc 1이 최상위여야 함");
+    }
+
+    /// 최종 반환 수 n을 존중한다.
+    #[pg_test]
+    fn ko_search_hybrid_respects_limit() {
+        setup_hybrid_table();
+        let cnt = Spi::get_one::<i64>(
+            "SELECT count(*) FROM ko_search_hybrid('hdocs','id','body','emb','형태소 분석', \
+             '[1,0,0]'::vector, 60, 60, 2)",
+        )
+        .expect("spi")
+        .expect("null");
+        assert_eq!(cnt, 2, "limit n=2를 존중해야 함");
     }
 }
 
