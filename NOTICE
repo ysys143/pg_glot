@@ -1,0 +1,21 @@
+pg_textsearch_ko — Third-Party Notices
+
+This extension family is licensed under the PostgreSQL License (see LICENSE).
+It builds on and/or depends on the following third-party components.
+
+[Embedded — Rust crates compiled into pg_tsvector_ko]
+  lindera            — MIT License. Korean/CJK morphological analysis engine
+                       (forked from kuromoji-rs). https://github.com/lindera/lindera
+  lindera-ko-dic     — Apache License 2.0. ko-dic dictionary data, derived from
+                       mecab-ko-dic (eunjeon / 은전한닢) and the 21st Century Sejong
+                       Project corpus. Embedded via the `embed-ko-dic` feature.
+
+[Runtime dependencies — NOT bundled; installed separately, used via `requires`]
+  pg_textsearch (Timescale/Tiger Data) — PostgreSQL License. BM25 index (Layer B).
+  pgvector                             — PostgreSQL License. Dense vector search.
+
+[Optional, opt-in feature — NOT enabled by default]
+  Kiwi (libkiwi)     — LGPL 2.1+. Alternative Korean analyzer, dynamically linked
+                       only when the `kiwi` feature is enabled. (follow-on)
+
+See docs/DESIGN.md (§6 license audit) for the full analysis.

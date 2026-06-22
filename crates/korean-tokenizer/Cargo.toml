@@ -1,0 +1,13 @@
+[package]
+name = "korean-tokenizer"
+description = "Korean morphological tokenizer (lindera + ko-dic) — reusable engine for pg_tsvector_ko"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# embed-ko-dic feature가 lindera-ko-dic/embed-ko-dic을 전파 → ko-dic 바이너리 임베드(외부 사전 0).
+lindera = { version = "3.0", features = ["embed-ko-dic"] }
+
+[dev-dependencies]
