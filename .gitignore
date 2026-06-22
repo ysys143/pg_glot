@@ -1,0 +1,18 @@
+.cwf
+.omc
+.venv
+.env
+# Rust / pgrx 빌드 산출물
+/target/
+**/*.rs.bk
+.ruff_cache/
+node_modules/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+.idea/
+.vscode/
+dist/
+build/
+*.egg-info/
