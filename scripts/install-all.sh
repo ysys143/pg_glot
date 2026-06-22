@@ -13,7 +13,8 @@ PG_CONFIG="${PG_CONFIG:-pg_config}"
 PGTS_REPO="${PGTS_REPO:-https://github.com/timescale/pg_textsearch}"
 PGTS_REF="${PGTS_REF:-76ea737a5e9a3ae79f4ea8b2028163f8e80e9406}"
 PGVECTOR_REPO="${PGVECTOR_REPO:-https://github.com/pgvector/pgvector}"
-PGVECTOR_REF="${PGVECTOR_REF:-v0.8.0}"
+# Docker 이미지의 apt pgvector(0.8.2)와 마이너 일치. (소스 빌드 vs apt 빌드 차이만 존재)
+PGVECTOR_REF="${PGVECTOR_REF:-v0.8.2}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 log()  { printf '\n[install-all] %s\n' "$*"; }
@@ -37,7 +38,7 @@ trap 'rm -rf "$BUILD"' EXIT
 
 # ── 1) pgvector (dense leg) ──────────────────────────────────────────────────
 if [ -f "$SHAREDIR/extension/vector.control" ] && [ "${REINSTALL:-0}" != "1" ]; then
-  log "pgvector already installed — skip"
+  log "pgvector already installed — skip (설치된 버전이 핀 $PGVECTOR_REF와 다를 수 있음; REINSTALL=1로 강제)"
 else
   log "building pgvector $PGVECTOR_REF"
   git clone --depth 1 --branch "$PGVECTOR_REF" "$PGVECTOR_REPO" "$BUILD/pgvector"
@@ -46,7 +47,7 @@ fi
 
 # ── 2) pg_textsearch (BM25 engine, 핀 커밋) ──────────────────────────────────
 if [ -f "$SHAREDIR/extension/pg_textsearch.control" ] && [ "${REINSTALL:-0}" != "1" ]; then
-  log "pg_textsearch already installed — skip (REINSTALL=1 to force)"
+  log "pg_textsearch already installed — skip (설치본이 핀 ${PGTS_REF:0:12}와 다를 수 있음; REINSTALL=1로 강제)"
 else
   log "building pg_textsearch @ ${PGTS_REF:0:12}"
   git clone "$PGTS_REPO" "$BUILD/pgts"
