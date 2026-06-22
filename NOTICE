@@ -10,12 +10,22 @@ It builds on and/or depends on the following third-party components.
                        mecab-ko-dic (eunjeon / 은전한닢) and the 21st Century Sejong
                        Project corpus. Embedded via the `embed-ko-dic` feature.
 
-[Runtime dependencies — NOT bundled; installed separately, used via `requires`]
+[Runtime dependencies — depended on via `requires`]
   pg_textsearch (Timescale/Tiger Data) — PostgreSQL License. BM25 index (Layer B).
   pgvector                             — PostgreSQL License. Dense vector search.
 
+  Distribution mode matters:
+    - Source / `make install-all`: these are NOT redistributed; they are fetched
+      from their official repositories at build time and installed separately.
+    - Docker image (`make docker-build`): these ARE bundled as compiled binaries
+      together with PostgreSQL. Their license texts are reproduced under
+      THIRD_PARTY_LICENSES/ to satisfy attribution. `pg_textsearch` is a trademark
+      of Timescale/Tiger Data; this bundle is not an official Timescale product.
+
 [Optional, opt-in feature — NOT enabled by default]
   Kiwi (libkiwi)     — LGPL 2.1+. Alternative Korean analyzer, dynamically linked
-                       only when the `kiwi` feature is enabled. (follow-on)
+                       only when the `kiwi` feature is enabled. Not in default
+                       builds or the default image. (follow-on)
 
-See docs/DESIGN.md (§6 license audit) for the full analysis.
+See THIRD_PARTY_LICENSES/ for bundled license texts and docs/DESIGN.md (§6 license
+audit) for the full analysis.
