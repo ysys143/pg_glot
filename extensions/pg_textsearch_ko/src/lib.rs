@@ -266,6 +266,96 @@ mod tests {
         .expect("null");
         assert_eq!(cnt, 2, "limit n=2를 존중해야 함");
     }
+
+    // ── index/query 일관성: BM25 incremental maintenance + 파서 동일성 (마일스톤 ④) ──
+
+    /// 인덱스 생성 후 INSERT한 행이 BM25 검색에 반영된다.
+    #[pg_test]
+    fn insert_reflected_in_bm25_search() {
+        Spi::run(
+            "CREATE TEMP TABLE c(id bigint primary key, body text); \
+             INSERT INTO c VALUES (1,'기존 문서 자료'); \
+             CREATE INDEX c_bm25 ON c USING bm25(body) WITH (text_config='public.korean'); \
+             INSERT INTO c VALUES (2,'신규 검색 항목');",
+        )
+        .expect("셋업");
+        let hit = Spi::get_one::<i64>("SELECT id FROM c ORDER BY body <@> '검색' LIMIT 1")
+            .expect("spi")
+            .expect("null");
+        assert_eq!(hit, 2, "인덱스 생성 후 INSERT한 행이 검색돼야 함");
+    }
+
+    /// UPDATE 후 새 토큰으로 검색된다.
+    #[pg_test]
+    fn update_reflected_in_bm25_search() {
+        Spi::run(
+            "CREATE TEMP TABLE c(id bigint primary key, body text); \
+             INSERT INTO c VALUES (1,'원본 자료 항목'),(2,'무관 문서 내용'); \
+             CREATE INDEX c_bm25 ON c USING bm25(body) WITH (text_config='public.korean'); \
+             UPDATE c SET body='수정된 검색 품질' WHERE id=1;",
+        )
+        .expect("셋업");
+        let hit = Spi::get_one::<i64>("SELECT id FROM c ORDER BY body <@> '품질' LIMIT 1")
+            .expect("spi")
+            .expect("null");
+        assert_eq!(hit, 1, "UPDATE 후 새 토큰 '품질'로 행 1이 검색돼야 함");
+    }
+
+    /// DELETE된 행은 검색 결과에서 빠진다.
+    #[pg_test]
+    fn delete_excluded_from_bm25_search() {
+        Spi::run(
+            "CREATE TEMP TABLE c(id bigint primary key, body text); \
+             INSERT INTO c VALUES (1,'형태소 분석 자료'),(2,'형태소 검색 항목'); \
+             CREATE INDEX c_bm25 ON c USING bm25(body) WITH (text_config='public.korean'); \
+             DELETE FROM c WHERE id=1;",
+        )
+        .expect("셋업");
+        let remaining = Spi::get_one::<i64>(
+            "SELECT count(*) FROM (SELECT id FROM c ORDER BY body <@> '형태소' LIMIT 10) s \
+             WHERE id = 1",
+        )
+        .expect("spi")
+        .expect("null");
+        assert_eq!(remaining, 0, "DELETE된 행은 검색 결과에서 빠져야 함");
+    }
+
+    /// 색인(index-time)과 질의(query-time)가 동일한 korean 파서를 쓴다:
+    /// 색인 텍스트의 조사 분리 토큰('한국어를'→'한국어')이 질의 '한국어'와 매칭.
+    #[pg_test]
+    fn index_query_parser_consistency() {
+        Spi::run(
+            "CREATE TEMP TABLE c(id bigint primary key, body text); \
+             INSERT INTO c VALUES (1,'한국어를 분석한다'),(2,'영어 텍스트 문서'); \
+             CREATE INDEX c_bm25 ON c USING bm25(body) WITH (text_config='public.korean');",
+        )
+        .expect("셋업");
+        let hit = Spi::get_one::<i64>("SELECT id FROM c ORDER BY body <@> '한국어' LIMIT 1")
+            .expect("spi")
+            .expect("null");
+        assert_eq!(
+            hit, 1,
+            "조사 분리된 '한국어를'이 질의 '한국어'와 매칭되어야 함(파서 일관성)"
+        );
+    }
+
+    // ── REINDEX (마일스톤 ⑤) ──────────────────────────────────────────────
+
+    /// REINDEX 후에도 BM25 검색이 유지된다.
+    #[pg_test]
+    fn reindex_preserves_search() {
+        Spi::run(
+            "CREATE TEMP TABLE c(id bigint primary key, body text); \
+             INSERT INTO c VALUES (1,'형태소 분석 자료'),(2,'서울 맛집 추천'); \
+             CREATE INDEX c_bm25 ON c USING bm25(body) WITH (text_config='public.korean'); \
+             REINDEX INDEX c_bm25;",
+        )
+        .expect("REINDEX 실패");
+        let hit = Spi::get_one::<i64>("SELECT id FROM c ORDER BY body <@> '형태소' LIMIT 1")
+            .expect("spi")
+            .expect("null");
+        assert_eq!(hit, 1, "REINDEX 후에도 검색이 유지돼야 함");
+    }
 }
 
 /// `cargo pgrx test`가 요구하는 모듈.
