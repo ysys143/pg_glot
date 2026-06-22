@@ -44,6 +44,23 @@ NDCG parity는 비현실적 목표다.
 판정한다(절대 parity는 토크나이저가 다른 한 불가). Kiwi opt-in(품질 1위 분석기)이 도입되면
 별도 baseline으로 비교한다.
 
+## MeCab same-harness 측정 (갭 원인 확정)
+
+같은 BM25 하니스에서 **토크나이저만** 바꿔 측정(python-mecab-ko로 accept-list 내용어를
+사전 토큰화 → PG `simple` config; `bench/mecab_pretokenize.py`):
+
+| 토크나이저 | config | NDCG@10 | Recall@10 |
+|---|---|---|---|
+| lindera ko-dic | `public.korean` | 0.606 | 0.767 |
+| **MeCab-ko**(accept-list) | `pg_catalog.simple` | **0.6328** | 0.784 |
+| research(MeCab + korean_stem) | — | 0.6385 | 0.797 |
+
+- **MeCab > lindera, +2.7%p(+4.4% 상대)** → 갭의 주범은 **토크나이저로 확정**(A1 가설 입증).
+- MeCab+simple ≈ research(−0.6%p) → korean_stem/english_stem은 보조 요인.
+- **함의**: lindera는 외부 의존 0으로 합리적 baseline(0.606). 한국어 최고 품질이 필요하면
+  opt-in 분석기(Kiwi 권장, MeCab도 +2~3%p)로 올린다 — 단 둘 다 C/C++ 외부 의존이라 opt-in.
+  `mecab_pretokenize.py`는 **측정 전용**이며 제품 코드(순수 Rust 정체성)에 들이지 않는다.
+
 ## 한계 (반드시 함께 읽을 것)
 
 1. **dev passages subset** — MIRACL dev의 positive+negative passages(~수천~1만)이며 MIRACL
