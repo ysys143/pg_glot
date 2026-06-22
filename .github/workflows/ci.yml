@@ -1,0 +1,27 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  # 순수 Rust 토크나이저 유닛 (PG 불필요, 최속)
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p korean-tokenizer
+
+  fmt-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -p korean-tokenizer --all-targets -- -D warnings
+
+  # TODO(M2+): pgrx pg_regress/pg_test 매트릭스 (pg17 우선).
+  #   - cargo install cargo-pgrx --version 0.18.0
+  #   - cargo pgrx init --pg17 <pg_config>
+  #   - cd extensions/pg_tsvector_ko && cargo pgrx test pg17
