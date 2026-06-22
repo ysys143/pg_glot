@@ -20,8 +20,10 @@ use std::sync::OnceLock;
 ::pgrx::pg_module_magic!(name, version);
 
 /// PostgreSQL 기본 파서(prsd_lextype) 토큰 타입 ID.
-const WORD: usize = 2; // 한국어 형태소 → "word"
-const BLANK: usize = 12; // 공백 → "blank"
+const ASCIIWORD: usize = 1; // ASCII 알파벳 토큰 → "asciiword" (english_stem 매핑)
+const WORD: usize = 2; // 한글/한자/가나 형태소 → "word"
+const NUMWORD: usize = 3; // ASCII 숫자 포함 토큰 → "numword"
+const BLANK: usize = 12; // 공백/기호/기능어 → "blank"
 
 /// 언어별 lindera 분석기: 백엔드 프로세스당 1회 로드(불변 공유). `tokenize`가 `&self`.
 #[cfg(feature = "korean")]
@@ -78,13 +80,25 @@ fn prs_start_impl(analyzer: &LinderaAnalyzer, input: Internal, len: i32) -> Inte
                 pgrx::error!("pg_glot: 입력이 유효한 UTF-8이 아님 (DB 인코딩은 UTF8이어야 함)")
             }
         };
+        let lang = analyzer.lang();
         let tokens = analyzer
             .tokenize(text)
             .into_iter()
             .map(|t| {
-                // 영숫자/한글/한자/한자(CJK)가 1자 이상이면 색인 대상(word), 순수 기호/공백은 blank.
-                // (char::is_alphanumeric: 한글/한자/가나=alphabetic, 숫자=numeric → true)
-                let lextype = if t.surface.chars().any(char::is_alphanumeric) {
+                // 기능어(POS 기준)는 blank. 내용어는 토큰 종류로 세분: ASCII 알파벳→
+                // asciiword(english_stem), ASCII 숫자→numword, 한글/한자/가나→word.
+                // 세분해야 config의 ADD MAPPING(asciiword→english_stem)이 적용된다.
+                let lextype = if !lang.is_content_pos(t.pos.as_deref()) {
+                    BLANK
+                } else if t.surface.is_ascii() {
+                    if t.surface.bytes().any(|b| b.is_ascii_alphabetic()) {
+                        ASCIIWORD
+                    } else if t.surface.bytes().any(|b| b.is_ascii_digit()) {
+                        NUMWORD
+                    } else {
+                        BLANK
+                    }
+                } else if t.surface.chars().any(char::is_alphanumeric) {
                     WORD
                 } else {
                     BLANK
@@ -213,8 +227,9 @@ COMMENT ON TEXT SEARCH PARSER korean IS 'Korean morphological parser (lindera + 
 CREATE TEXT SEARCH CONFIGURATION korean (PARSER = korean);
 COMMENT ON TEXT SEARCH CONFIGURATION korean IS 'Korean text search configuration (lindera)';
 ALTER TEXT SEARCH CONFIGURATION korean ADD MAPPING FOR
-    word, hword, hword_part, numword, numhword, hword_numpart,
-    asciiword, asciihword, hword_asciipart WITH simple;
+    word, hword, hword_part, numword, numhword, hword_numpart WITH simple;
+ALTER TEXT SEARCH CONFIGURATION korean ADD MAPPING FOR
+    asciiword, asciihword, hword_asciipart WITH english_stem;
 "#,
     name = "korean_ts_config",
     requires = [ko_prs_start, glot_prs_nexttoken, glot_prs_end],
@@ -231,8 +246,9 @@ COMMENT ON TEXT SEARCH PARSER japanese IS 'Japanese morphological parser (linder
 CREATE TEXT SEARCH CONFIGURATION japanese (PARSER = japanese);
 COMMENT ON TEXT SEARCH CONFIGURATION japanese IS 'Japanese text search configuration (lindera)';
 ALTER TEXT SEARCH CONFIGURATION japanese ADD MAPPING FOR
-    word, hword, hword_part, numword, numhword, hword_numpart,
-    asciiword, asciihword, hword_asciipart WITH simple;
+    word, hword, hword_part, numword, numhword, hword_numpart WITH simple;
+ALTER TEXT SEARCH CONFIGURATION japanese ADD MAPPING FOR
+    asciiword, asciihword, hword_asciipart WITH english_stem;
 "#,
     name = "japanese_ts_config",
     requires = [ja_prs_start, glot_prs_nexttoken, glot_prs_end],
@@ -249,8 +265,9 @@ COMMENT ON TEXT SEARCH PARSER chinese IS 'Chinese word-segmentation parser (lind
 CREATE TEXT SEARCH CONFIGURATION chinese (PARSER = chinese);
 COMMENT ON TEXT SEARCH CONFIGURATION chinese IS 'Chinese text search configuration (lindera)';
 ALTER TEXT SEARCH CONFIGURATION chinese ADD MAPPING FOR
-    word, hword, hword_part, numword, numhword, hword_numpart,
-    asciiword, asciihword, hword_asciipart WITH simple;
+    word, hword, hword_part, numword, numhword, hword_numpart WITH simple;
+ALTER TEXT SEARCH CONFIGURATION chinese ADD MAPPING FOR
+    asciiword, asciihword, hword_asciipart WITH english_stem;
 "#,
     name = "chinese_ts_config",
     requires = [zh_prs_start, glot_prs_nexttoken, glot_prs_end],
@@ -392,6 +409,22 @@ mod tests {
         .expect("spi")
         .expect("null");
         assert!(m, "zh 색인/질의 일관성: @@ 매칭");
+    }
+
+    // ── POS 필터(A1): ja만 기능어(助詞/助動詞/記号) 색인 제외.
+    //    ko는 비활성(MIRACL 측정상 NDCG 무개선), zh는 cc-cedict POS 미제공. ──
+
+    /// ja: 助詞(조사)는 빠지고 명사는 남는다.
+    #[cfg(feature = "japanese")]
+    #[pg_test]
+    fn japanese_drops_particles() {
+        let arr = Spi::get_one::<Vec<String>>(
+            "SELECT tsvector_to_array(to_tsvector('japanese', '東京に住む'))",
+        )
+        .expect("spi")
+        .expect("null");
+        assert!(arr.iter().any(|w| w == "東京"), "명사 東京 포함: {arr:?}");
+        assert!(!arr.iter().any(|w| w == "に"), "조사 'に' 제외: {arr:?}");
     }
 }
 

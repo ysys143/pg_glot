@@ -18,7 +18,10 @@ repository = "https://github.com/ysys143/pg_glot"
 authors = ["ysys143"]
 
 [workspace.dependencies]
-glot-tokenizer = { path = "crates/glot-tokenizer" }
+# default-features=false: 소비자(pg_glot)가 언어 feature를 명시적으로 켠다
+# (pg_glot default = pg17 + korean/japanese/chinese). 워크스페이스에서 끄지 않으면
+# 소비자 쪽 default-features=false가 무시된다(cargo 경고).
+glot-tokenizer = { path = "crates/glot-tokenizer", default-features = false }
 
 # pgrx 확장은 panic="unwind" 필수. 프로파일은 워크스페이스 루트에만 둘 수 있음(멤버 불가).
 [profile.dev]
