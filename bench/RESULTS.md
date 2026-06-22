@@ -4,70 +4,56 @@
 실제 pg_textsearch BM25 인덱스를 만들고 검색 → NDCG@10 / Recall@10. **bakeoff/(순수
 Python BM25, INDICATIVE)와 달리 실제 엔진 측정**이지만, 아래 한계를 반드시 함께 읽을 것.
 
-## 결과 (MIRACL dev, BM25-only, POS(ja)+english_stem+lextype 정교화 반영)
+## 결과 (MIRACL dev, BM25-only)
 
 | lang | config | docs | queries | NDCG@10 | Recall@10 | empty |
 |---|---|---|---|---|---|---|
-| ko | `public.korean`   | 10000 | 213 | **0.6057** | 0.7672 | 0 |
+| ko | `public.korean`   | 10000 | 213 | **0.6344** | 0.7983 | 0 |
 | ja | `public.japanese` |  8066 | 860 | **0.5397** | 0.7298 | 0 |
 | zh | `public.chinese`  |  3786 | 393 | **0.4577** | 0.6461 | 0 |
 
-**이 수치를 glot의 lindera baseline으로 삼는다**(release gate, 아래 §재정의).
+ko는 MeCab accept-list POS 필터 + english_stem 반영. **research MeCab BM25(0.6385)의 99.4%**.
 
-## A1: 품질 정교화 실험 (measure-first — 가설 세우고 측정하고 기각)
+## 핵심 발견: 갭의 레버는 토크나이저가 아니라 POS 필터였다 (measure-first)
 
-research Phase7 BM25(MeCab 기반, NDCG 0.6385)와의 ko 갭을 메우려는 가설들을 동일
-데이터로 측정했다. **조사 결과 research `korean` config는 우리와 토크나이저부터 다르다**:
-MeCab + `korean_stem`(한국어 어간) + ASCII `english_stem`. 우리는 lindera ko-dic + `simple`.
+research MeCab(0.6385) 대비 lindera 무필터(0.606)의 갭을 끝까지 측정으로 분해했다.
+같은 10K 하니스에서 토크나이저/POS 조건을 분리:
 
-| 가설 | 변경 | ko Δ NDCG | 판정 |
-|---|---|---|---|
-| POS 필터(기능어 색인 제외) | `is_content_pos` | 0.6058 → 0.5983 (**−0.75%p**) | **기각**(IDF와 중복, 무이득) |
-| english_stem(ASCII 스테밍) | asciiword→english_stem | 0.6058 → 0.6057 (**무변**) | **기각**(ko corpus ASCII 2.8%) |
+| 구성 | NDCG@10 | 해석 |
+|---|---|---|
+| lindera 무필터 | 0.606 | 출발점 |
+| MeCab 전체 morphs(무필터) | 0.6038 | **토크나이저만 바꾸면 ≈ lindera** |
+| MeCab + accept-list(POS 필터) | 0.6328 | POS 필터가 +2.9%p |
+| **lindera + accept-list**(simple) | **0.6362** | **lindera가 MeCab 초과** |
+| **lindera + accept-list + english_stem**(production korean config) | **0.6344** | 출하본 |
+| research MeCab | 0.6385 | 목표(99.4% 도달) |
 
-- **POS 필터는 ko에서 무효**(오히려 미세 하락) — BM25 IDF가 흔한 기능어를 이미 누른다.
-  단 **ja는 recall +1.6%p**(助詞/助動詞 제거가 도움) → ja만 유지. zh는 cc-cedict가 POS
-  미제공이라 적용 불가.
-- **english_stem은 정상 작동**(`Running servers`→`run server`)하나 ko corpus의 ASCII 비율이
-  **2.8%**라 NDCG 영향이 없다. 정합성(올바른 ASCII 처리)·혼합 텍스트 도메인엔 유효해 유지.
+- **토크나이저 분절은 lindera ≈ MeCab**(무필터 0.606 vs 0.6038). 갭은 토크나이저가 아니었다.
+- **진짜 레버는 정확한 POS accept-list**(`NNG,NNP,NNB,NNBC,NR,VV,VA,MM,MAG,XSN,XR,SH,SL`).
+  lindera·MeCab 모두 같은 ko-dic POS 체계라, lindera에 그대로 이식해 **+2.8%p**(0.606→0.634).
+- **MeCab/Kiwi opt-in 불필요** — lindera(순수 Rust·임베드·최속)로 MeCab 품질을 **정체성 그대로** 달성.
+- A1에서 "POS 필터 무효(−0.75%p)"라 한 건 잘못된 **넓은 allowlist**(`N*/V*/MA*`) 탓. 정확한
+  accept-list가 답이었다. (가설→측정→재측정으로 자기수정)
 
-### 결론: 갭의 주원인은 토크나이저
-POS·스테밍 둘 다 ko 갭을 못 메웠다. 남은 차이는 **① 토크나이저(MeCab ≠ lindera,
-bake-off Jaccard 0.97 = 3% 토큰 불일치) ② korean_stem(한국어 어간 정규화)** 이며, 둘 다
-우리 정체성인 **lindera(순수 Rust 임베드)로는 본질적으로 재현 어렵다**. MeCab과의 정확한
-NDCG parity는 비현실적 목표다.
+## ja/zh
+- **ja**: 助詞/助動詞/記号 등 기능어 제외(denylist) → recall +1.6%p. NDCG 0.5397.
+- **zh**: cc-cedict가 POS 미제공('*') → 필터 불가, 전부 색인. NDCG 0.4577.
+- ko>ja>zh 순서는 MIRACL 언어별 BM25 난이도와 일치(정상).
 
-## release gate 재정의 (DESIGN §5.5)
+## release gate (DESIGN §5.5)
 
-"research 0.6385 재현"이 아니라 **"lindera baseline(ko 0.606) + 회귀 없음 + 측정 가능한
-개선"** 으로 재정의한다. 향후 분석기/사전/정규화 변경은 이 baseline 대비 **상대 측정**으로
-판정한다(절대 parity는 토크나이저가 다른 한 불가). Kiwi opt-in(품질 1위 분석기)이 도입되면
-별도 baseline으로 비교한다.
-
-## MeCab same-harness 측정 (갭 원인 확정)
-
-같은 BM25 하니스에서 **토크나이저만** 바꿔 측정(python-mecab-ko로 accept-list 내용어를
-사전 토큰화 → PG `simple` config; `bench/mecab_pretokenize.py`):
-
-| 토크나이저 | config | NDCG@10 | Recall@10 |
-|---|---|---|---|
-| lindera ko-dic | `public.korean` | 0.606 | 0.767 |
-| **MeCab-ko**(accept-list) | `pg_catalog.simple` | **0.6328** | 0.784 |
-| research(MeCab + korean_stem) | — | 0.6385 | 0.797 |
-
-- **MeCab > lindera, +2.7%p(+4.4% 상대)** → 갭의 주범은 **토크나이저로 확정**(A1 가설 입증).
-- MeCab+simple ≈ research(−0.6%p) → korean_stem/english_stem은 보조 요인.
-- **함의**: lindera는 외부 의존 0으로 합리적 baseline(0.606). 한국어 최고 품질이 필요하면
-  opt-in 분석기(Kiwi 권장, MeCab도 +2~3%p)로 올린다 — 단 둘 다 C/C++ 외부 의존이라 opt-in.
-  `mecab_pretokenize.py`는 **측정 전용**이며 제품 코드(순수 Rust 정체성)에 들이지 않는다.
+lindera baseline = **ko BM25 NDCG 0.634**(research MeCab 0.6385의 99.4%). 토크나이저 교체나
+외부 의존 없이 사실상 동급에 도달했다. 향후 분석기/사전/정규화 변경은 이 baseline 대비
+**상대 측정**으로 판정. dense/RRF는 텍스트 검색(BM25) 위에 얹는 층이라 별도.
 
 ## 한계 (반드시 함께 읽을 것)
 
-1. **dev passages subset** — MIRACL dev의 positive+negative passages(~수천~1만)이며 MIRACL
-   **full corpus(ja ~700만/zh ~500만)가 아니다**. 공식 리더보드와 **직접 비교 불가**.
-2. **BM25만** — dense/RRF(`glot.hybrid`)는 임베딩(BGE-M3 등) 확보 후 측정. 여기는 lexical 단독.
-3. **유의성 미검정** — bootstrap CI/per-query 분석 없음(±0.5%p 수준 차이는 noise일 수 있음).
-4. **POS 필터는 ja만 활성**, ko 비활성(측정 근거), zh는 POS 미제공.
+1. **dev passages subset** — MIRACL dev의 positive+negative passages(~수천~1만)이며 full
+   corpus가 아니다. 공식 리더보드와 **직접 비교 불가**.
+2. **BM25만** — dense/RRF는 임베딩 확보 후. 여기는 lexical 단독.
+3. **유의성 미검정** — bootstrap CI/per-query 없음(±0.5%p는 noise일 수 있음).
+4. **MeCab 측정은 측정 전용** — `bench/mecab_pretokenize.py`는 갭 분해용이며 제품(순수 Rust)에
+   들이지 않는다. 결론은 "lindera로 충분"이다.
 
 ## 재현
 
@@ -77,6 +63,7 @@ DSN="host=localhost port=5433 user=postgres password=pw dbname=postgres"
 python3 bench/eval_glot.py --lang korean   --corpus bench/data/ko/corpus.json --queries bench/data/ko/queries.json --dsn "$DSN"
 python3 bench/eval_glot.py --lang japanese --corpus bench/data/ja/corpus.json --queries bench/data/ja/queries.json --dsn "$DSN"
 python3 bench/eval_glot.py --lang chinese  --corpus bench/data/zh/corpus.json --queries bench/data/zh/queries.json --dsn "$DSN"
+# 갭 분해(측정 전용): bench/mecab_pretokenize.py, bench/eval_bm25_grid.py
 ```
 
 데이터는 라이선스/용량상 커밋하지 않는다(재생성). MIRACL = Apache-2.0 + Wikipedia

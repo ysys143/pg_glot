@@ -89,13 +89,20 @@ impl Lang {
             Some(p) => p,
             None => return true,
         };
-        let _ = pos;
         match self {
-            // ko: POS 필터가 NDCG를 개선하지 않아(MIRACL 측정 0.6058→0.5983) 비활성.
-            // lindera 형태소 분리가 이미 어간을 뽑고, BM25 IDF가 흔한 기능어를 눌러 명시적
-            // 제거의 순이득이 없다(research 갭의 원인은 POS가 아닌 토크나이저/스테밍).
+            // ko: MeCab accept-list(내용어 POS)로 색인. lindera + 이 필터 = NDCG 0.636(MIRACL
+            // 측정) → MeCab(0.633)/research(0.6385) 동급. 정체성(순수 Rust 임베드)을 지키며
+            // 품질 확보. (A1의 넓은 allowlist N*/V*/MA*는 무효였으나, 정확한 accept-list가 +3%p.
+            // 토크나이저 분절은 lindera≈MeCab이고 진짜 레버는 이 POS 필터였다.)
+            // 복합 태그(예: 'VV+EC')는 첫 형태소(VV) 기준으로 판정.
             #[cfg(feature = "korean")]
-            Lang::Korean => true,
+            Lang::Korean => {
+                const ACCEPT: &[&str] = &[
+                    "NNG", "NNP", "NNB", "NNBC", "NR", "VV", "VA", "MM", "MAG", "XSN", "XR", "SH",
+                    "SL",
+                ];
+                ACCEPT.contains(&pos.split('+').next().unwrap_or(""))
+            }
             // ipadic: 助詞(조사)/助動詞(조동사)/記号(기호) 등 제외 → recall 개선(측정 +1.5%p).
             #[cfg(feature = "japanese")]
             Lang::Japanese => !matches!(
@@ -367,11 +374,13 @@ mod tests {
 
     #[test]
     fn is_content_pos_filters_functional_words() {
-        // ko: POS 필터 비활성(측정 결과 무효) → 조사를 포함해 모든 POS를 색인(true).
+        // ko: MeCab accept-list — 명사/용언 등 내용어는 색인, 조사/어미는 제외.
         #[cfg(feature = "korean")]
         {
             assert!(Lang::Korean.is_content_pos(Some("NNG")));
-            assert!(Lang::Korean.is_content_pos(Some("JKO")));
+            assert!(Lang::Korean.is_content_pos(Some("VV+EC"))); // 복합 → 첫 형태소 VV
+            assert!(!Lang::Korean.is_content_pos(Some("JKO"))); // 조사
+            assert!(!Lang::Korean.is_content_pos(Some("EC"))); // 어미
         }
         #[cfg(feature = "japanese")]
         {

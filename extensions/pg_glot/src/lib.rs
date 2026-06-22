@@ -411,8 +411,23 @@ mod tests {
         assert!(m, "zh 색인/질의 일관성: @@ 매칭");
     }
 
-    // ── POS 필터(A1): ja만 기능어(助詞/助動詞/記号) 색인 제외.
-    //    ko는 비활성(MIRACL 측정상 NDCG 무개선), zh는 cc-cedict POS 미제공. ──
+    // ── POS 필터: ko(MeCab accept-list)·ja(기능어 제외)로 내용어만 색인. zh는 POS 미제공. ──
+
+    /// ko: 조사/어미는 빠지고 내용어(명사/용언)만 남는다.
+    #[cfg(feature = "korean")]
+    #[pg_test]
+    fn korean_drops_functional_words() {
+        let arr = Spi::get_one::<Vec<String>>(
+            "SELECT tsvector_to_array(to_tsvector('korean', '한국어를 배운다'))",
+        )
+        .expect("spi")
+        .expect("null");
+        assert!(
+            arr.iter().any(|w| w == "한국어"),
+            "내용어 한국어 포함: {arr:?}"
+        );
+        assert!(!arr.iter().any(|w| w == "를"), "조사 '를' 제외: {arr:?}");
+    }
 
     /// ja: 助詞(조사)는 빠지고 명사는 남는다.
     #[cfg(feature = "japanese")]
