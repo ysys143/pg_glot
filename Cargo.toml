@@ -7,6 +7,7 @@ resolver = "2"
 members = [
     "crates/korean-tokenizer",
     "extensions/pg_tsvector_ko",
+    "extensions/pg_textsearch_ko",
 ]
 
 [workspace.package]

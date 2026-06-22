@@ -1506,6 +1506,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pg_textsearch_ko"
+version = "0.0.1"
+dependencies = [
+ "pgrx",
+ "pgrx-tests",
+]
+
+[[package]]
 name = "pg_tsvector_ko"
 version = "0.0.1"
 dependencies = [
