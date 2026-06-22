@@ -1,22 +1,17 @@
-//! glot-tokenizer — lindera 기반 한국어 형태소 토크나이저 (순수 Rust).
+//! glot-tokenizer — lindera 기반 CJK(한·중·일) 형태소 토크나이저 (순수 Rust).
 //!
-//! `pg_glot`(Layer A)가 이 크레이트로 PostgreSQL `korean` text search
-//! configuration(커스텀 TS parser)을 구성한다. lindera 사전은 백엔드 프로세스당
-//! 1회 로드해 불변 공유한다(`tokenize`가 `&self`).
+//! `pg_glot`(Layer A)가 이 크레이트로 PostgreSQL `korean`/`japanese`/`chinese`
+//! text search configuration(커스텀 TS parser)을 구성한다. lindera 사전은 백엔드
+//! 프로세스당 1회 로드해 불변 공유한다(`tokenize`가 `&self`).
 //!
-//! 엔진=lindera(MIT, kuromoji-rs 계보), 사전=ko-dic(mecab-ko-dic 계열, Apache-2.0)
-//! `embed-ko-dic` feature로 바이너리에 임베드 → 외부 사전 설치 0.
+//! 엔진=lindera(MIT, kuromoji-rs 계보). 사전: ko-dic(ko, Apache-2.0) / IPADIC(ja) /
+//! CC-CEDICT(zh). feature(`korean`/`japanese`/`chinese`, default 셋 다)로 임베드 선택.
+//! 실제 검증·출하는 korean; ja/zh는 구조 지원(품질 미검증).
 
 use lindera::dictionary::load_dictionary;
 use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
 use lindera::tokenizer::Tokenizer;
-
-/// 임베드된 ko-dic 사전 버전(lindera-ko-dic 3.0.x가 번들한 mecab-ko-dic).
-///
-/// lindera-ko-dic 3.0.7 `build.rs`/`NOTICE.txt`로 확인된 값. 의존성을 올려
-/// 임베드 사전이 바뀌면 이 상수를 함께 갱신할 것.
-pub const KO_DIC_VERSION: &str = "mecab-ko-dic-2.1.1-20180720";
 
 /// 분절에 영향을 주는 lindera 엔진 버전. Cargo.toml의 exact 핀(`lindera = "=3.0.7"`)과
 /// 반드시 일치해야 한다 — 핀과 이 상수는 함께 움직인다(`lindera_constant_matches_cargo_lock`
@@ -24,14 +19,73 @@ pub const KO_DIC_VERSION: &str = "mecab-ko-dic-2.1.1-20180720";
 /// 먼저 분절을 재검증한 뒤 핀과 이 상수를 동시에 갱신할 것.
 pub const LINDERA_VERSION: &str = "3.0.7";
 
-/// 임베드된 사전 + 엔진의 버전 식별자.
-///
-/// 사전(또는 분절 정책에 영향을 주는 엔진 버전)이 바뀌면 기존 tsvector/BM25
-/// 인덱스는 stale이 된다 — **사전은 인덱스 정의의 일부**이므로 REINDEX가 필요하다.
-/// `pg_glot`는 이를 `glot.dictionary_version()` SQL 함수로 노출한다.
+/// 임베드된 ko-dic 사전 버전(lindera-ko-dic 3.0.7 `build.rs`/`NOTICE.txt`로 확인).
+#[cfg(feature = "korean")]
+pub const KO_DIC_VERSION: &str = "mecab-ko-dic-2.1.1-20180720";
+/// 임베드된 IPADIC 사전 버전(lindera-ipadic 3.0.7).
+#[cfg(feature = "japanese")]
+pub const IPADIC_VERSION: &str = "mecab-ipadic-2.7.0-20070801";
+/// 임베드된 CC-CEDICT 사전(lindera-cc-cedict 3.0.7).
+#[cfg(feature = "chinese")]
+pub const CC_CEDICT_VERSION: &str = "CC-CEDICT (lindera-cc-cedict 3.0.7)";
+
+/// 지원 언어(=임베드 사전). feature로 게이트된다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lang {
+    #[cfg(feature = "korean")]
+    Korean,
+    #[cfg(feature = "japanese")]
+    Japanese,
+    #[cfg(feature = "chinese")]
+    Chinese,
+}
+
+impl Lang {
+    fn embedded_uri(self) -> &'static str {
+        match self {
+            #[cfg(feature = "korean")]
+            Lang::Korean => "embedded://ko-dic",
+            #[cfg(feature = "japanese")]
+            Lang::Japanese => "embedded://ipadic",
+            #[cfg(feature = "chinese")]
+            Lang::Chinese => "embedded://cc-cedict",
+        }
+    }
+
+    /// PostgreSQL TS config 이름(`korean`/`japanese`/`chinese`).
+    #[must_use]
+    pub fn config_name(self) -> &'static str {
+        match self {
+            #[cfg(feature = "korean")]
+            Lang::Korean => "korean",
+            #[cfg(feature = "japanese")]
+            Lang::Japanese => "japanese",
+            #[cfg(feature = "chinese")]
+            Lang::Chinese => "chinese",
+        }
+    }
+
+    /// 임베드 사전 + 엔진 버전 식별자. 사전(또는 분절에 영향을 주는 엔진 버전)이
+    /// 바뀌면 기존 tsvector/BM25 인덱스는 stale → REINDEX(사전은 인덱스 정의의 일부).
+    #[must_use]
+    pub fn dictionary_version(self) -> String {
+        let (dic, feat) = match self {
+            #[cfg(feature = "korean")]
+            Lang::Korean => (KO_DIC_VERSION, "embed-ko-dic"),
+            #[cfg(feature = "japanese")]
+            Lang::Japanese => (IPADIC_VERSION, "embed-ipadic"),
+            #[cfg(feature = "chinese")]
+            Lang::Chinese => (CC_CEDICT_VERSION, "embed-cc-cedict"),
+        };
+        format!("{dic} (lindera {LINDERA_VERSION}, {feat})")
+    }
+}
+
+/// 하위호환: 인자 없는 사전버전 = korean. `pg_glot`이 `glot.dictionary_version()`으로 노출.
+#[cfg(feature = "korean")]
 #[must_use]
 pub fn dictionary_version() -> String {
-    format!("{KO_DIC_VERSION} (lindera {LINDERA_VERSION}, embed-ko-dic)")
+    Lang::Korean.dictionary_version()
 }
 
 /// 한 형태소 토큰. `byte_start`/`byte_end`는 입력 UTF-8 바이트 오프셋
@@ -51,19 +105,25 @@ pub trait Analyzer: Send + Sync {
     fn tokenize(&self, text: &str) -> Vec<Token>;
 }
 
-/// lindera + 임베드 ko-dic 기반 분석기.
+/// lindera 기반 분석기(언어=`Lang`). 사전 로드는 무겁다 — 프로세스당 1회 권장.
 pub struct LinderaAnalyzer {
     tokenizer: Tokenizer,
 }
 
 impl LinderaAnalyzer {
-    /// 임베드된 ko-dic으로 분석기 생성. 무겁다(사전 로드) — 프로세스당 1회 권장.
-    pub fn new_ko_dic() -> lindera::LinderaResult<Self> {
-        let dictionary = load_dictionary("embedded://ko-dic")?;
+    /// 지정 언어의 임베드 사전으로 분석기 생성.
+    pub fn new(lang: Lang) -> lindera::LinderaResult<Self> {
+        let dictionary = load_dictionary(lang.embedded_uri())?;
         let segmenter = Segmenter::new(Mode::Normal, dictionary, None);
         Ok(Self {
             tokenizer: Tokenizer::new(segmenter),
         })
+    }
+
+    /// 하위호환: ko-dic 분석기 = `new(Lang::Korean)`.
+    #[cfg(feature = "korean")]
+    pub fn new_ko_dic() -> lindera::LinderaResult<Self> {
+        Self::new(Lang::Korean)
     }
 }
 
@@ -221,5 +281,51 @@ mod tests {
             "LINDERA_VERSION 상수({LINDERA_VERSION})와 Cargo.lock 해석 버전({locked})이 \
              불일치 — lindera 핀을 올렸다면 LINDERA_VERSION 상수도 갱신하고 분절을 재검증할 것"
         );
+    }
+
+    // ── ja/zh: CJK 확장. byte-offset 불변식(text[start..end]==surface)은 언어 불문 —
+    //    PostgreSQL TS parser 정확성의 핵심이라 모든 언어에서 검증한다. ──
+
+    #[cfg(feature = "japanese")]
+    #[test]
+    fn tokenizes_japanese_offsets_map_to_surface() {
+        let a = LinderaAnalyzer::new(Lang::Japanese).expect("ipadic 로드 실패");
+        let text = "東京都に住んでいます";
+        let toks = a.tokenize(text);
+        assert!(!toks.is_empty(), "일본어 토큰이 비어있음");
+        for t in &toks {
+            assert_eq!(
+                text.get(t.byte_start..t.byte_end),
+                Some(t.surface.as_str()),
+                "offset 슬라이스 != surface (ja)"
+            );
+        }
+    }
+
+    #[cfg(feature = "chinese")]
+    #[test]
+    fn tokenizes_chinese_offsets_map_to_surface() {
+        let a = LinderaAnalyzer::new(Lang::Chinese).expect("cc-cedict 로드 실패");
+        let text = "我喜欢自然语言处理";
+        let toks = a.tokenize(text);
+        assert!(!toks.is_empty(), "중국어 토큰이 비어있음");
+        for t in &toks {
+            assert_eq!(
+                text.get(t.byte_start..t.byte_end),
+                Some(t.surface.as_str()),
+                "offset 슬라이스 != surface (zh)"
+            );
+        }
+    }
+
+    /// 언어별 사전버전 식별자가 해당 사전을 가리킨다.
+    #[test]
+    fn dictionary_version_per_lang() {
+        #[cfg(feature = "korean")]
+        assert!(Lang::Korean.dictionary_version().contains("ko-dic"));
+        #[cfg(feature = "japanese")]
+        assert!(Lang::Japanese.dictionary_version().contains("ipadic"));
+        #[cfg(feature = "chinese")]
+        assert!(Lang::Chinese.dictionary_version().contains("CC-CEDICT"));
     }
 }

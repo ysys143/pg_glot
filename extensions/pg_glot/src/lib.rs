@@ -11,7 +11,7 @@
 //! - 입력은 UTF-8 검증 후 처리(비-UTF8 DB 인코딩이면 ereport).
 //! - panic은 pgrx `#[pg_guard]`(매크로가 자동 부착)가 ereport로 변환.
 
-use glot_tokenizer::{Analyzer, LinderaAnalyzer};
+use glot_tokenizer::{Analyzer, Lang, LinderaAnalyzer};
 use pgrx::prelude::*;
 use pgrx::Internal;
 use std::os::raw::{c_char, c_int};
@@ -23,13 +23,33 @@ use std::sync::OnceLock;
 const WORD: usize = 2; // 한국어 형태소 → "word"
 const BLANK: usize = 12; // 공백 → "blank"
 
-/// lindera 분석기: 백엔드 프로세스당 1회 로드(불변 공유). `tokenize`가 `&self`.
-static ANALYZER: OnceLock<LinderaAnalyzer> = OnceLock::new();
+/// 언어별 lindera 분석기: 백엔드 프로세스당 1회 로드(불변 공유). `tokenize`가 `&self`.
+#[cfg(feature = "korean")]
+static KO_ANALYZER: OnceLock<LinderaAnalyzer> = OnceLock::new();
+#[cfg(feature = "japanese")]
+static JA_ANALYZER: OnceLock<LinderaAnalyzer> = OnceLock::new();
+#[cfg(feature = "chinese")]
+static ZH_ANALYZER: OnceLock<LinderaAnalyzer> = OnceLock::new();
 
-fn analyzer() -> &'static LinderaAnalyzer {
-    ANALYZER.get_or_init(|| {
-        LinderaAnalyzer::new_ko_dic()
-            .unwrap_or_else(|e| pgrx::error!("pg_glot: lindera ko-dic 로드 실패: {e:?}"))
+#[cfg(feature = "korean")]
+fn ko_analyzer() -> &'static LinderaAnalyzer {
+    KO_ANALYZER.get_or_init(|| {
+        LinderaAnalyzer::new(Lang::Korean)
+            .unwrap_or_else(|e| pgrx::error!("pg_glot: ko-dic 로드 실패: {e:?}"))
+    })
+}
+#[cfg(feature = "japanese")]
+fn ja_analyzer() -> &'static LinderaAnalyzer {
+    JA_ANALYZER.get_or_init(|| {
+        LinderaAnalyzer::new(Lang::Japanese)
+            .unwrap_or_else(|e| pgrx::error!("pg_glot: ipadic 로드 실패: {e:?}"))
+    })
+}
+#[cfg(feature = "chinese")]
+fn zh_analyzer() -> &'static LinderaAnalyzer {
+    ZH_ANALYZER.get_or_init(|| {
+        LinderaAnalyzer::new(Lang::Chinese)
+            .unwrap_or_else(|e| pgrx::error!("pg_glot: cc-cedict 로드 실패: {e:?}"))
     })
 }
 
@@ -44,9 +64,9 @@ struct OutTok {
     lextype: usize,
 }
 
-/// `prsstart(internal input, int4 len) -> internal`
-#[pg_extern(immutable, parallel_safe)]
-fn ko_prs_start(input: Internal, len: i32) -> Internal {
+/// prsstart 공통 구현: 주어진 analyzer로 토큰화해 ParserState(palloc)를 반환한다.
+/// 언어별 START 함수가 자기 analyzer로 이 함수를 호출(GETTOKEN/END는 언어 무관 공유).
+fn prs_start_impl(analyzer: &LinderaAnalyzer, input: Internal, len: i32) -> Internal {
     // SAFETY: PG가 (char* input, int len)로 정규 호출. input datum은 입력 텍스트 포인터.
     let state = unsafe {
         let datum = input.unwrap().expect("pg_glot: null parser input");
@@ -58,12 +78,12 @@ fn ko_prs_start(input: Internal, len: i32) -> Internal {
                 pgrx::error!("pg_glot: 입력이 유효한 UTF-8이 아님 (DB 인코딩은 UTF8이어야 함)")
             }
         };
-        let tokens = analyzer()
+        let tokens = analyzer
             .tokenize(text)
             .into_iter()
             .map(|t| {
-                // 영숫자/한글/한자가 1자 이상이면 색인 대상(word), 순수 기호/공백은 blank.
-                // (char::is_alphanumeric: 한글/한자=alphabetic, 숫자=numeric → true)
+                // 영숫자/한글/한자/한자(CJK)가 1자 이상이면 색인 대상(word), 순수 기호/공백은 blank.
+                // (char::is_alphanumeric: 한글/한자/가나=alphabetic, 숫자=numeric → true)
                 let lextype = if t.surface.chars().any(char::is_alphanumeric) {
                     WORD
                 } else {
@@ -80,9 +100,9 @@ fn ko_prs_start(input: Internal, len: i32) -> Internal {
     Internal::new(state)
 }
 
-/// `prsgettoken(internal state, internal **t, internal *tlen) -> internal` (반환 datum = int 토큰타입)
+/// 공통 `prsgettoken` — ParserState 순회(언어 무관, 모든 config가 공유한다).
 #[pg_extern(immutable, parallel_safe)]
-fn ko_prs_nexttoken(mut state: Internal, t: Internal, tlen: Internal) -> Internal {
+fn glot_prs_nexttoken(mut state: Internal, t: Internal, tlen: Internal) -> Internal {
     let lextype: usize = unsafe {
         match state.get_mut::<ParserState>() {
             Some(st) if st.idx < st.tokens.len() => {
@@ -109,9 +129,26 @@ fn ko_prs_nexttoken(mut state: Internal, t: Internal, tlen: Internal) -> Interna
     Internal::from(Some(pg_sys::Datum::from(lextype)))
 }
 
-/// `prsend(internal state) -> void`. 상태는 memory context 삭제 시 자동 정리.
+/// 공통 `prsend` — 상태는 memory context 삭제 시 자동 정리.
 #[pg_extern(immutable, parallel_safe)]
-fn ko_prs_end(_state: Internal) {}
+fn glot_prs_end(_state: Internal) {}
+
+/// 언어별 `prsstart` (각자 자기 analyzer 사용; GETTOKEN/END는 공통).
+#[cfg(feature = "korean")]
+#[pg_extern(immutable, parallel_safe)]
+fn ko_prs_start(input: Internal, len: i32) -> Internal {
+    prs_start_impl(ko_analyzer(), input, len)
+}
+#[cfg(feature = "japanese")]
+#[pg_extern(immutable, parallel_safe)]
+fn ja_prs_start(input: Internal, len: i32) -> Internal {
+    prs_start_impl(ja_analyzer(), input, len)
+}
+#[cfg(feature = "chinese")]
+#[pg_extern(immutable, parallel_safe)]
+fn zh_prs_start(input: Internal, len: i32) -> Internal {
+    prs_start_impl(zh_analyzer(), input, len)
+}
 
 /// `glot` 네임스페이스 — 언어무관 공통 함수. 이 확장(pg_glot)이 `glot` 스키마를
 /// 소유하고, pg_glot_hybrid(Layer B)가 그 위에 `glot.hybrid`를 더한다(스키마 공유).
@@ -163,31 +200,60 @@ mod glot {
     }
 }
 
+// 언어별 TS parser + configuration. GETTOKEN/END(glot_prs_*)는 공유, START만 언어별.
+// 토큰 매핑은 simple(소문자화+중복제거). 후속: ASCII는 english_stem, POS 정교화.
+#[cfg(feature = "korean")]
 extension_sql!(
     r#"
 CREATE TEXT SEARCH PARSER korean (
-    START    = ko_prs_start,
-    GETTOKEN = ko_prs_nexttoken,
-    END      = ko_prs_end,
-    LEXTYPES = pg_catalog.prsd_lextype,
-    HEADLINE = pg_catalog.prsd_headline
+    START = ko_prs_start, GETTOKEN = glot_prs_nexttoken, END = glot_prs_end,
+    LEXTYPES = pg_catalog.prsd_lextype, HEADLINE = pg_catalog.prsd_headline
 );
 COMMENT ON TEXT SEARCH PARSER korean IS 'Korean morphological parser (lindera + ko-dic)';
-
 CREATE TEXT SEARCH CONFIGURATION korean (PARSER = korean);
 COMMENT ON TEXT SEARCH CONFIGURATION korean IS 'Korean text search configuration (lindera)';
-
--- 형태소/숫자/ASCII 토큰을 simple 사전으로 매핑(소문자화+중복제거, 별도 스테밍 없음).
--- (후속: ASCII는 english_stem, POS 기반 정교화)
-ALTER TEXT SEARCH CONFIGURATION korean
-    ADD MAPPING FOR
-        word, hword, hword_part,
-        numword, numhword, hword_numpart,
-        asciiword, asciihword, hword_asciipart
-    WITH simple;
+ALTER TEXT SEARCH CONFIGURATION korean ADD MAPPING FOR
+    word, hword, hword_part, numword, numhword, hword_numpart,
+    asciiword, asciihword, hword_asciipart WITH simple;
 "#,
     name = "korean_ts_config",
-    requires = [ko_prs_start, ko_prs_nexttoken, ko_prs_end],
+    requires = [ko_prs_start, glot_prs_nexttoken, glot_prs_end],
+);
+
+#[cfg(feature = "japanese")]
+extension_sql!(
+    r#"
+CREATE TEXT SEARCH PARSER japanese (
+    START = ja_prs_start, GETTOKEN = glot_prs_nexttoken, END = glot_prs_end,
+    LEXTYPES = pg_catalog.prsd_lextype, HEADLINE = pg_catalog.prsd_headline
+);
+COMMENT ON TEXT SEARCH PARSER japanese IS 'Japanese morphological parser (lindera + IPADIC)';
+CREATE TEXT SEARCH CONFIGURATION japanese (PARSER = japanese);
+COMMENT ON TEXT SEARCH CONFIGURATION japanese IS 'Japanese text search configuration (lindera)';
+ALTER TEXT SEARCH CONFIGURATION japanese ADD MAPPING FOR
+    word, hword, hword_part, numword, numhword, hword_numpart,
+    asciiword, asciihword, hword_asciipart WITH simple;
+"#,
+    name = "japanese_ts_config",
+    requires = [ja_prs_start, glot_prs_nexttoken, glot_prs_end],
+);
+
+#[cfg(feature = "chinese")]
+extension_sql!(
+    r#"
+CREATE TEXT SEARCH PARSER chinese (
+    START = zh_prs_start, GETTOKEN = glot_prs_nexttoken, END = glot_prs_end,
+    LEXTYPES = pg_catalog.prsd_lextype, HEADLINE = pg_catalog.prsd_headline
+);
+COMMENT ON TEXT SEARCH PARSER chinese IS 'Chinese word-segmentation parser (lindera + CC-CEDICT)';
+CREATE TEXT SEARCH CONFIGURATION chinese (PARSER = chinese);
+COMMENT ON TEXT SEARCH CONFIGURATION chinese IS 'Chinese text search configuration (lindera)';
+ALTER TEXT SEARCH CONFIGURATION chinese ADD MAPPING FOR
+    word, hword, hword_part, numword, numhword, hword_numpart,
+    asciiword, asciihword, hword_asciipart WITH simple;
+"#,
+    name = "chinese_ts_config",
+    requires = [zh_prs_start, glot_prs_nexttoken, glot_prs_end],
 );
 
 #[cfg(any(test, feature = "pg_test"))]
@@ -276,6 +342,56 @@ mod tests {
             .expect("null");
         assert!(v.contains("mecab-ko-dic"), "ko-dic 사전 식별: {v}");
         assert!(v.contains("2.1.1-20180720"), "사전 버전: {v}");
+    }
+
+    // ── ja/zh config (CJK 확장) ──────────────────────────────────────────
+
+    /// 'japanese' config가 일본어를 형태소 토큰으로 분해한다.
+    #[cfg(feature = "japanese")]
+    #[pg_test]
+    fn japanese_config_tokenizes() {
+        let n = Spi::get_one::<i32>(
+            "SELECT array_length(tsvector_to_array(to_tsvector('japanese', '東京都に住んでいます')), 1)",
+        )
+        .expect("spi")
+        .expect("null");
+        assert!(n >= 2, "일본어 형태소 2개 이상, 실제 {n}");
+    }
+
+    /// 'japanese' 색인/질의 파서 일관성.
+    #[cfg(feature = "japanese")]
+    #[pg_test]
+    fn japanese_tsvector_matches_tsquery() {
+        let m = Spi::get_one::<bool>(
+            "SELECT to_tsvector('japanese', '東京都に住んでいます') @@ to_tsquery('japanese', '東京')",
+        )
+        .expect("spi")
+        .expect("null");
+        assert!(m, "ja 색인/질의 일관성: @@ 매칭");
+    }
+
+    /// 'chinese' config가 중국어를 단어로 분절한다.
+    #[cfg(feature = "chinese")]
+    #[pg_test]
+    fn chinese_config_tokenizes() {
+        let n = Spi::get_one::<i32>(
+            "SELECT array_length(tsvector_to_array(to_tsvector('chinese', '我喜欢自然语言处理')), 1)",
+        )
+        .expect("spi")
+        .expect("null");
+        assert!(n >= 2, "중국어 단어 2개 이상, 실제 {n}");
+    }
+
+    /// 'chinese' 색인/질의 파서 일관성: 색인 텍스트에 등장한 단어로 질의하면 매칭.
+    #[cfg(feature = "chinese")]
+    #[pg_test]
+    fn chinese_tsvector_matches_tsquery() {
+        let m = Spi::get_one::<bool>(
+            "SELECT to_tsvector('chinese', '北京欢迎你') @@ to_tsquery('chinese', '北京')",
+        )
+        .expect("spi")
+        .expect("null");
+        assert!(m, "zh 색인/질의 일관성: @@ 매칭");
     }
 }
 

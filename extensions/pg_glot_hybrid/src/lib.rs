@@ -377,6 +377,27 @@ mod tests {
             .expect("null");
         assert_eq!(hit, 1, "REINDEX 후에도 검색이 유지돼야 함");
     }
+
+    // ── CJK: hybrid는 BM25 인덱스의 config를 따라가 언어 무관 ──────────────
+
+    /// 일본어 인덱스(`text_config='public.japanese'`)에서도 BM25+dense 융합이 동작한다.
+    #[pg_test]
+    fn hybrid_japanese_end_to_end() {
+        Spi::run(
+            "CREATE TEMP TABLE jdocs(id bigint primary key, body text, emb vector(3)); \
+             INSERT INTO jdocs VALUES \
+               (1,'東京都に住んでいます','[1,0,0]'),(2,'大阪の食べ物が好き','[0,1,0]'); \
+             CREATE INDEX jdocs_bm25 ON jdocs \
+                 USING bm25(body) WITH (text_config='public.japanese');",
+        )
+        .expect("일본어 BM25 인덱스 빌드 실패");
+        let top = Spi::get_one::<i64>(
+            "SELECT id FROM glot.hybrid('jdocs','id','body','emb','東京','[1,0,0]'::vector) LIMIT 1",
+        )
+        .expect("spi")
+        .expect("null");
+        assert_eq!(top, 1, "ja BM25+dense 융합: doc 1 최상위");
+    }
 }
 
 /// `cargo pgrx test`가 요구하는 모듈.
