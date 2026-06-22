@@ -3,12 +3,16 @@ pg_textsearch_ko — Third-Party Notices
 This extension family is licensed under the PostgreSQL License (see LICENSE).
 It builds on and/or depends on the following third-party components.
 
-[Embedded — Rust crates compiled into pg_tsvector_ko]
-  lindera            — MIT License. Korean/CJK morphological analysis engine
+[Embedded — Rust crates compiled into pg_tsvector_ko / pg_textsearch_ko]
+  lindera            — MIT OR Apache-2.0. Korean/CJK morphological analysis engine
                        (forked from kuromoji-rs). https://github.com/lindera/lindera
   lindera-ko-dic     — Apache License 2.0. ko-dic dictionary data, derived from
                        mecab-ko-dic (eunjeon / 은전한닢) and the 21st Century Sejong
                        Project corpus. Embedded via the `embed-ko-dic` feature.
+  (+ all other statically-linked crates: pgrx, serde, etc. — permissive MIT/Apache/
+   BSD/ISC. The complete, authoritative list with full license/copyright texts is in
+   THIRD_PARTY_LICENSES/RUST_CRATES.html, generated from Cargo.lock by cargo-about and
+   gated by cargo-deny — see THIRD_PARTY_LICENSES/README.md.)
 
 [Runtime dependencies — depended on via `requires`]
   pg_textsearch (Timescale/Tiger Data) — PostgreSQL License. BM25 index (Layer B).

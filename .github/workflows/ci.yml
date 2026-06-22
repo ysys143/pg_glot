@@ -21,6 +21,15 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy -p korean-tokenizer --all-targets -- -D warnings
 
+  # 번들(.so)에 정적 링크되는 크레이트의 라이선스 게이트 — copyleft 유입 차단.
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-deny --version "^0.16" --locked
+      - run: cargo deny check licenses
+
   # TODO(M2+): pgrx pg_regress/pg_test 매트릭스 (pg17 우선).
   #   - cargo install cargo-pgrx --version 0.18.0
   #   - cargo pgrx init --pg17 <pg_config>

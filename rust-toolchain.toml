@@ -1,0 +1,7 @@
+# 재현성: 로컬·CI·Docker가 동일 Rust toolchain을 쓰도록 핀(공급망/빌드 일관성).
+[toolchain]
+channel = "1.95.0"
+profile = "minimal"
+# fmt/clippy를 핀된 toolchain에 포함(이게 없으면 CI가 stable용 component를 깔아
+# 'cargo-fmt is not installed for 1.95.0'로 실패).
+components = ["rustfmt", "clippy"]
