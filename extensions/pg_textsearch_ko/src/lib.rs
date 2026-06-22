@@ -63,7 +63,19 @@ fn ko_rrf(
 // top-k로 뽑아 거리순 id 배열을 만들고, ko_rrf로 융합해 상위 n을 돌려준다.
 // 동적 SQL이지만 식별자는 `format('%I')`, 테이블은 `regclass`(검증된 OID)로만
 // 들어가므로 SQL injection 면역. 권한은 invoker(SECURITY DEFINER 회피, §10).
-// `<@>`/`<=>`/`ko_rrf` 해석을 위해 search_path에 public을 포함하되 고정한다.
+//
+// 순위 보존(BLOCKER 회귀 가드): `ORDER BY <@>/<=> ... LIMIT` 스캔의 산출 순서는
+// `row_number() OVER ()`(빈 윈도)로 그냥 들어가면 **보존이 보장되지 않는다**
+// (subquery의 ORDER BY는 ordering을 소비하지 않는 부모로 살아남지 않으며, ORDER BY
+// 없는 WindowAgg는 그 소비자가 아니다). 그래서 각 leg의 LIMIT된 정렬 스캔을
+// `WITH t AS MATERIALIZED (...)`로 고정해 윈도 입력 순서를 핀한다. BM25 leg는
+// `row_number() OVER (ORDER BY <@>)`로 바꾸면 별도 WindowAgg 정렬이 생겨
+// pg_textsearch planner hook(plain ORDER BY+LIMIT+리터럴 질의에서만 인덱스 매칭)을
+// 무력화할 수 있으므로 절대 그렇게 하지 않는다.
+//
+// search_path(§10): `@extschema@.ko_rrf`로 한정해 user의 `public.ko_rrf` shadowing을
+// 차단하고, BM25 `<@>`/dense `<=>` 연산자는 `OPERATOR(public.<@>)`/`OPERATOR(public.<=>)`로
+// 스키마 한정해 search_path에서 public을 제거(`pg_catalog, pg_temp`)한다.
 extension_sql!(
     r#"
 CREATE FUNCTION ko_search_hybrid(
@@ -79,8 +91,8 @@ CREATE FUNCTION ko_search_hybrid(
 ) RETURNS TABLE(id bigint, score double precision)
 LANGUAGE plpgsql
 STABLE
-PARALLEL SAFE
-SET search_path = pg_catalog, public, pg_temp
+PARALLEL RESTRICTED
+SET search_path = pg_catalog, pg_temp
 AS $func$
 DECLARE
     bm25_ids  bigint[];
@@ -90,26 +102,29 @@ BEGIN
     -- pg_textsearch `<@>`는 plain ORDER BY+LIMIT(인덱스 스캔)에서만 동작하고,
     -- planner hook은 질의가 **리터럴**일 때만 인덱스를 매칭하므로 q_text는 %L
     -- (quote_literal, injection 안전)로 인라인한다. 순위는 정렬 결과의 순번.
+    -- MATERIALIZED CTE가 LIMIT된 정렬 스캔을 고정해 윈도 입력 순서를 보존한다.
     EXECUTE format(
+        'WITH t AS MATERIALIZED ('
+        '  SELECT (%1$I)::bigint AS k FROM %2$s'
+        '  ORDER BY (%3$I OPERATOR(public.<@>) %4$L) LIMIT %5$L)'
         'SELECT array_agg(k ORDER BY ord) FROM ('
-        '  SELECT k, row_number() OVER () AS ord FROM ('
-        '    SELECT (%1$I)::bigint AS k FROM %2$s'
-        '    ORDER BY (%3$I <@> %4$L) LIMIT %5$L) t) u',
+        '  SELECT k, row_number() OVER () AS ord FROM t) u',
         key_col, rel::text, text_col, q_text, per_leg
     ) INTO bm25_ids;
 
     -- dense leg: pgvector 거리, 인덱스 top-k (동일 순위화 패턴).
     EXECUTE format(
+        'WITH t AS MATERIALIZED ('
+        '  SELECT (%1$I)::bigint AS k FROM %2$s'
+        '  ORDER BY (%3$I OPERATOR(public.<=>) $1) LIMIT $2)'
         'SELECT array_agg(k ORDER BY ord) FROM ('
-        '  SELECT k, row_number() OVER () AS ord FROM ('
-        '    SELECT (%1$I)::bigint AS k FROM %2$s'
-        '    ORDER BY (%3$I <=> $1) LIMIT $2) t) u',
+        '  SELECT k, row_number() OVER () AS ord FROM t) u',
         key_col, rel::text, vec_col
     ) INTO dense_ids USING q_vec, per_leg;
 
     RETURN QUERY
         SELECT r.id, r.score
-        FROM ko_rrf(
+        FROM @extschema@.ko_rrf(
                  COALESCE(bm25_ids,  ARRAY[]::bigint[]),
                  COALESCE(dense_ids, ARRAY[]::bigint[]),
                  k) AS r
@@ -252,6 +267,48 @@ mod tests {
         .expect("spi")
         .expect("null");
         assert_eq!(top, 1, "BM25+dense 양쪽 강한 doc 1이 최상위여야 함");
+    }
+
+    /// 융합 결과의 **순위 순서**가 BM25 rank 순서를 정확히 보존한다(집합 멤버십이 아님).
+    ///
+    /// 회귀 가드(BLOCKER): BM25 leg의 `ORDER BY <@> ... LIMIT` 산출 순서가
+    /// `row_number() OVER ()`(빈 윈도)로 들어갈 때 보존되지 않으면 RRF rank가
+    /// 뒤섞인다. dense leg를 BM25와 **동일 순서**(doc1>doc3>doc4>doc5)로 정렬되도록
+    /// 거리를 단조 분리해 dense가 순서를 강화만 하게 하고(타이 없음), 두 leg가
+    /// 일관되게 같은 순서를 산출할 때만 최종이 [1,3,4,5]가 되게 설계한다. 어느 한
+    /// leg라도 row_number 스크램블이 생기면 순서가 뒤집힌다.
+    #[pg_test]
+    fn ko_search_hybrid_preserves_bm25_rank_order() {
+        // '형태소' 빈도: doc1=4, doc3=3, doc4=2, doc5=1 → BM25 rank 1,2,3,4 결정적.
+        // doc2: '형태소' 무관(BM25 미히트, dense도 직교로 최하위).
+        // dense 거리(query [1,0,0] 기준): doc1<doc3<doc4<doc5<doc2 단조 분리(타이 없음).
+        Spi::run(
+            "CREATE TEMP TABLE rdocs(id bigint primary key, body text, emb vector(3)); \
+             INSERT INTO rdocs VALUES \
+               (1,'형태소 형태소 형태소 형태소 분석','[1,0,0]'), \
+               (2,'서울 맛집 추천 정보','[0,1,0]'), \
+               (3,'형태소 형태소 형태소 자료','[1,0.2,0]'), \
+               (4,'형태소 형태소 연구','[1,0.5,0]'), \
+               (5,'형태소 검토','[1,0.9,0]'); \
+             CREATE INDEX rdocs_bm25 ON rdocs \
+                 USING bm25(body) WITH (text_config='public.korean');",
+        )
+        .expect("회귀 테이블 셋업 실패");
+        // 상위 4개를 순서대로 수집. 두 leg가 일관되면 [1,3,4,5].
+        // row_number 스크램블이 발생하면 순서가 뒤집히거나 doc2가 끼어든다.
+        let ordered = Spi::get_one::<Vec<i64>>(
+            "SELECT array_agg(id ORDER BY ord) FROM ( \
+               SELECT id, row_number() OVER (ORDER BY score DESC, id) AS ord \
+               FROM ko_search_hybrid('rdocs','id','body','emb','형태소','[1,0,0]'::vector, \
+                                      60, 60, 4)) s",
+        )
+        .expect("spi")
+        .expect("null");
+        assert_eq!(
+            ordered,
+            vec![1, 3, 4, 5],
+            "융합 상위 순서는 BM25 rank를 보존해 [1,3,4,5]여야 함(실제 {ordered:?})"
+        );
     }
 
     /// 최종 반환 수 n을 존중한다.
