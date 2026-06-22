@@ -19,3 +19,7 @@ build/
 
 # agent worktrees (ephemeral)
 .claude/worktrees/
+
+# 평가 코퍼스(재생성, 라이선스/용량) — bench/fetch_miracl.py로 받음
+bench/data/
+bench/__pycache__/
