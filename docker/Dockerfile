@@ -1,10 +1,10 @@
-# pg_textsearch_ko — 원클릭 이미지.
-# postgres:17 베이스에 전체 스택(pgvector + pg_textsearch + pg_tsvector_ko +
-# pg_textsearch_ko)을 구워넣고 pg_textsearch를 preload한다.
+# pg_glot_hybrid — 원클릭 이미지.
+# postgres:17 베이스에 전체 스택(pgvector + pg_textsearch + pg_glot +
+# pg_glot_hybrid)을 구워넣고 pg_textsearch를 preload한다.
 #
-#   docker build -f docker/Dockerfile -t pg_textsearch_ko:17 .
-#   docker run -d -e POSTGRES_PASSWORD=pw -p 5432:5432 pg_textsearch_ko:17
-#   psql ... -c "CREATE EXTENSION pg_textsearch_ko CASCADE;"   # 첫 init 시 자동 실행됨
+#   docker build -f docker/Dockerfile -t pg_glot_hybrid:17 .
+#   docker run -d -e POSTGRES_PASSWORD=pw -p 5432:5432 pg_glot_hybrid:17
+#   psql ... -c "CREATE EXTENSION pg_glot_hybrid CASCADE;"   # 첫 init 시 자동 실행됨
 #
 # 재현성/공급망(리뷰 반영):
 #   - 베이스 이미지를 **digest로 핀** → 빌드/런타임 스테이지가 동일한 PG(17.10)를
@@ -45,8 +45,8 @@ RUN git clone https://github.com/timescale/pg_textsearch /tmp/pgts \
 # 우리 확장 2개 (pgrx). lindera가 ko-dic을 임베드하므로 빌드가 무겁다.
 WORKDIR /src
 COPY . /src
-RUN cd extensions/pg_tsvector_ko && cargo pgrx install --release --pg-config "$(which pg_config)" \
- && cd /src/extensions/pg_textsearch_ko && cargo pgrx install --release --pg-config "$(which pg_config)"
+RUN cd extensions/pg_glot && cargo pgrx install --release --pg-config "$(which pg_config)" \
+ && cd /src/extensions/pg_glot_hybrid && cargo pgrx install --release --pg-config "$(which pg_config)"
 
 # ── runtime stage ────────────────────────────────────────────────────────────
 FROM postgres:${PG_MAJOR}@${PG_DIGEST}
@@ -61,19 +61,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # 확장 산출물만 선택 복사 (PG 코어 라이브러리는 절대 덮지 않는다).
 COPY --from=build /usr/lib/postgresql/${PG_MAJOR}/lib/pg_textsearch.so     /usr/lib/postgresql/${PG_MAJOR}/lib/
-COPY --from=build /usr/lib/postgresql/${PG_MAJOR}/lib/pg_tsvector_ko.so    /usr/lib/postgresql/${PG_MAJOR}/lib/
-COPY --from=build /usr/lib/postgresql/${PG_MAJOR}/lib/pg_textsearch_ko.so  /usr/lib/postgresql/${PG_MAJOR}/lib/
+COPY --from=build /usr/lib/postgresql/${PG_MAJOR}/lib/pg_glot.so    /usr/lib/postgresql/${PG_MAJOR}/lib/
+COPY --from=build /usr/lib/postgresql/${PG_MAJOR}/lib/pg_glot_hybrid.so  /usr/lib/postgresql/${PG_MAJOR}/lib/
 COPY --from=build /usr/share/postgresql/${PG_MAJOR}/extension/pg_textsearch*    /usr/share/postgresql/${PG_MAJOR}/extension/
-COPY --from=build /usr/share/postgresql/${PG_MAJOR}/extension/pg_tsvector_ko*   /usr/share/postgresql/${PG_MAJOR}/extension/
-COPY --from=build /usr/share/postgresql/${PG_MAJOR}/extension/pg_textsearch_ko* /usr/share/postgresql/${PG_MAJOR}/extension/
+COPY --from=build /usr/share/postgresql/${PG_MAJOR}/extension/pg_glot*   /usr/share/postgresql/${PG_MAJOR}/extension/
+COPY --from=build /usr/share/postgresql/${PG_MAJOR}/extension/pg_glot_hybrid* /usr/share/postgresql/${PG_MAJOR}/extension/
 
 # 새 클러스터마다 pg_textsearch를 preload(initdb가 conf.sample을 복사).
 RUN echo "shared_preload_libraries = 'pg_textsearch'" \
         >> /usr/share/postgresql/${PG_MAJOR}/postgresql.conf.sample
 
 # 번들 배포 고지(THIRD_PARTY_LICENSES + NOTICE/LICENSE). RUST_CRATES.html 포함.
-COPY THIRD_PARTY_LICENSES/ /usr/share/doc/pg_textsearch_ko/THIRD_PARTY_LICENSES/
-COPY NOTICE LICENSE        /usr/share/doc/pg_textsearch_ko/
+COPY THIRD_PARTY_LICENSES/ /usr/share/doc/pg_glot_hybrid/THIRD_PARTY_LICENSES/
+COPY NOTICE LICENSE        /usr/share/doc/pg_glot_hybrid/
 
 # 첫 init 시 *기본 init DB*에만 전체 스택을 자동 생성(편의). 추가 DB는 수동 생성 필요.
 COPY docker/initdb/10-create-extension.sql /docker-entrypoint-initdb.d/

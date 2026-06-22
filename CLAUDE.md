@@ -1,12 +1,12 @@
-# pg_textsearch_ko — coding guidelines
+# pg_glot_hybrid — coding guidelines
 
-pg_textsearch_ko is a **Rust / pgrx PostgreSQL extension family** for Korean search
+pg_glot_hybrid is a **Rust / pgrx PostgreSQL extension family** for Korean search
 (lindera-backed `korean` text search config → BM25 → RRF hybrid). Monorepo (Cargo
 workspace); local dev/target PostgreSQL is **17** (pgrx-managed), other majors via Cargo
 features. Full design, decisions, and license audit live in **`docs/DESIGN.md`** (read it first).
 
 Build & test:
-- `make unit` — pure-Rust tokenizer tests (`korean-tokenizer`), no PG, fastest loop.
+- `make unit` — pure-Rust tokenizer tests (`glot-tokenizer`), no PG, fastest loop.
 - `cd extensions/<ext> && cargo pgrx test pg17` — `#[pg_test]` in a real PG17 (the bulk).
 - `cargo pgrx run pg17` — interactive psql against the dev instance (manual checks).
 - `make fmt` / `make lint` — `cargo fmt` / `clippy -D warnings`.
@@ -18,7 +18,7 @@ These conventions apply to all code-writing agents.
 ## Kent Beck — TDD & Tidy First
 
 ### 1. Red → Green → Refactor
-- For new behavior, write the failing test **first**: a Rust unit test in `korean-tokenizer`
+- For new behavior, write the failing test **first**: a Rust unit test in `glot-tokenizer`
   (tokenizer logic) or a `#[pg_test]` (SQL-visible behavior, e.g. `to_tsvector('korean', …)`,
   `ts_debug`, `@@`). Confirm it is RED.
 - Implement the minimum to make `cargo pgrx test pg17` (and/or `make unit`) GREEN.
@@ -54,7 +54,7 @@ These conventions apply to all code-writing agents.
   are stale (REINDEX). Treat dictionary version as a reproducibility concern.
 
 ### 6. Test layers (a pgrx extension is NOT unit-test-heavy)
-- **Rust unit** (`korean-tokenizer`) — tokenization, offsets, edge cases. Fast, isolated.
+- **Rust unit** (`glot-tokenizer`) — tokenization, offsets, edge cases. Fast, isolated.
 - **`#[pg_test]` / pg_regress** — the bulk: `to_tsvector`/`ts_debug`/`@@`, BM25 round-trip,
   index↔query consistency, against a real PG.
 - **isolation** — concurrent insert/scan, cache safety (when the index layer lands).
@@ -71,7 +71,7 @@ The `korean` parser crosses the C ABI (`internal`/`int4` functions PG calls dire
 - Copy/return token bytes that live in the palloc-managed state; PG copies them during `gettoken`.
 - Validate input is UTF-8 at the boundary → `ereport` on failure (DB encoding must be UTF8).
 - Let `#[pg_guard]` (pgrx-applied) convert panics to `ereport`; never unwind across the ABI.
-- A `SECURITY DEFINER` function (e.g. future `ko_search_hybrid`) must pin
+- A `SECURITY DEFINER` function (e.g. future `glot.hybrid`) must pin
   `SET search_path = pg_catalog, …, pg_temp`.
 
 ---

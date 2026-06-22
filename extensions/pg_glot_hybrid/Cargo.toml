@@ -1,5 +1,5 @@
 [package]
-name = "pg_textsearch_ko"
+name = "pg_glot_hybrid"
 description = "Korean BM25 + RRF hybrid search for PostgreSQL (pg_textsearch + pgvector over the korean config)"
 version.workspace = true
 edition.workspace = true
@@ -21,7 +21,7 @@ pg_test = []
 
 [dependencies]
 # Layer B는 SQL 레벨 융합(BM25 leg=pg_textsearch, dense leg=pgvector, fusion=RRF)이라
-# lindera(korean-tokenizer)를 직접 의존하지 않는다. korean config는 Layer A가 제공.
+# lindera(glot-tokenizer)를 직접 의존하지 않는다. korean config는 Layer A가 제공.
 pgrx = "=0.18.0"
 
 [dev-dependencies.pgrx-tests]

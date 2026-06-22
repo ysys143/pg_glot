@@ -1,9 +1,9 @@
-pg_textsearch_ko — Third-Party Notices
+pg_glot_hybrid — Third-Party Notices
 
 This extension family is licensed under the PostgreSQL License (see LICENSE).
 It builds on and/or depends on the following third-party components.
 
-[Embedded — Rust crates compiled into pg_tsvector_ko / pg_textsearch_ko]
+[Embedded — Rust crates compiled into pg_glot / pg_glot_hybrid]
   lindera            — MIT OR Apache-2.0. Korean/CJK morphological analysis engine
                        (forked from kuromoji-rs). https://github.com/lindera/lindera
   lindera-ko-dic     — Apache License 2.0. ko-dic dictionary data, derived from

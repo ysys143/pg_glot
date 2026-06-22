@@ -9,7 +9,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p korean-tokenizer
+      - run: cargo test -p glot-tokenizer
 
   fmt-lint:
     runs-on: ubuntu-latest
@@ -19,7 +19,7 @@ jobs:
         with:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
-      - run: cargo clippy -p korean-tokenizer --all-targets -- -D warnings
+      - run: cargo clippy -p glot-tokenizer --all-targets -- -D warnings
 
   # 번들(.so)에 정적 링크되는 크레이트의 라이선스 게이트 — copyleft 유입 차단.
   licenses:
@@ -33,4 +33,4 @@ jobs:
   # TODO(M2+): pgrx pg_regress/pg_test 매트릭스 (pg17 우선).
   #   - cargo install cargo-pgrx --version 0.18.0
   #   - cargo pgrx init --pg17 <pg_config>
-  #   - cd extensions/pg_tsvector_ko && cargo pgrx test pg17
+  #   - cd extensions/pg_glot && cargo pgrx test pg17

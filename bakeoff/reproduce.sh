@@ -13,7 +13,7 @@ set -euo pipefail
 
 VENV_PY=/Users/jaesolshin/Documents/GitHub/textsearch/.venv/bin/python
 HEPHAEX=/tmp/hephaex_mecab_ko
-BAKEOFF_DIR=/Users/jaesolshin/Documents/GitHub/pg_textsearch_ko/bakeoff
+BAKEOFF_DIR=/Users/jaesolshin/Documents/GitHub/pg_glot_hybrid/bakeoff
 
 echo "==> [1/4] lindera-cli 설치 (ko-dic 임베딩)"
 # lindera 3.x: feature 이름은 embed-ko-dic (구버전 ko-dic 아님)

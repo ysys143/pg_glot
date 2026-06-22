@@ -1,7 +1,7 @@
 comment = 'Korean BM25 + RRF hybrid search (pg_textsearch + pgvector over the korean config)'
 default_version = '@CARGO_VERSION@'
-module_pathname = 'pg_textsearch_ko'
+module_pathname = 'pg_glot_hybrid'
 relocatable = false
 superuser = true
 trusted = false
-requires = 'pg_tsvector_ko, pg_textsearch, vector'
+requires = 'pg_glot, pg_textsearch, vector'
