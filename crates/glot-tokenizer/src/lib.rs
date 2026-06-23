@@ -170,6 +170,31 @@ impl LinderaAnalyzer {
     }
 }
 
+/// 가타카나 중점(`・` U+30FB, 반각 `･` U+FF65)으로 surface를 하위 토큰으로 분할한다.
+/// lindera/ipadic은 외국 인명 "トーマス・エジソン"을 **단일 토큰**으로 emit하는데, 그러면
+/// "エジソン" 쿼리가 매칭되지 않는다(MIRACL ja 측정: recall −4.4%p / NDCG −2.6%p). PG 기본
+/// 파서가 ・에서 분할하는 것과 동일하게 쪼갠다. 반환 오프셋은 원문 기준(`base`를 더함)이라
+/// `text[start..end] == surface` 불변식을 그대로 유지한다. ・가 없으면 통째로(빠른 경로).
+fn split_middle_dot(surface: &str, base: usize) -> Vec<(&str, usize, usize)> {
+    if !surface.contains(['・', '･']) {
+        return vec![(surface, base, base + surface.len())];
+    }
+    let mut out = Vec::new();
+    let mut seg = 0; // surface 내 세그먼트 시작 바이트
+    for (i, c) in surface.char_indices() {
+        if c == '・' || c == '･' {
+            if i > seg {
+                out.push((&surface[seg..i], base + seg, base + i));
+            }
+            seg = i + c.len_utf8();
+        }
+    }
+    if surface.len() > seg {
+        out.push((&surface[seg..], base + seg, base + surface.len()));
+    }
+    out
+}
+
 impl Analyzer for LinderaAnalyzer {
     fn tokenize(&self, text: &str) -> Vec<Token> {
         let mut tokens = match self.tokenizer.tokenize(text) {
@@ -184,12 +209,15 @@ impl Analyzer for LinderaAnalyzer {
                 .first()
                 .map(|d| d.to_string())
                 .filter(|s| !s.is_empty() && s != "UNK");
-            out.push(Token {
-                surface: tok.surface.to_string(),
-                byte_start: tok.byte_start,
-                byte_end: tok.byte_end,
-                pos,
-            });
+            // ・-결합 토큰을 하위 토큰으로 분할(없으면 1개 그대로). 오프셋은 원문 기준 유지.
+            for (sub, start, end) in split_middle_dot(&tok.surface, tok.byte_start) {
+                out.push(Token {
+                    surface: sub.to_string(),
+                    byte_start: start,
+                    byte_end: end,
+                    pos: pos.clone(),
+                });
+            }
         }
         out
     }
@@ -342,6 +370,61 @@ mod tests {
                 Some(t.surface.as_str()),
                 "offset 슬라이스 != surface (ja)"
             );
+        }
+    }
+
+    // 가타카나 중점(・)으로 이어진 외국 인명은 하위 토큰으로 분리되어야 한다. lindera/ipadic은
+    // "トーマス・エジソン"을 단일 토큰으로 emit하는데, 그러면 "エジソン" 쿼리가 매칭되지 않는다
+    // (MIRACL ja 측정: recall −4.4%p / NDCG −2.6%p). PG 기본 파서가 ・에서 분할하는 것과 동일.
+    // split_middle_dot: 결정적 단위 테스트(lindera 무관). 오프셋은 base 기준이며 ・(3바이트)를
+    // 건너뛴다. 빈 세그먼트(선두/말미/연속 ・)는 버린다.
+    #[test]
+    fn split_middle_dot_offsets_and_segments() {
+        // 단순: ・ 없음 → 통째로.
+        assert_eq!(split_middle_dot("東京", 0), vec![("東京", 0, 6)]);
+        // 분할 + 원문 기준 오프셋(base=10).
+        let s = "トーマス・エジソン";
+        let parts = split_middle_dot(s, 10);
+        let surfs: Vec<&str> = parts.iter().map(|p| p.0).collect();
+        assert_eq!(surfs, vec!["トーマス", "エジソン"]);
+        // base를 빼면 원래 surface 슬라이스와 일치.
+        for (sub, start, end) in parts {
+            assert_eq!(&s[start - 10..end - 10], sub);
+        }
+        // 반각 ･ + 선두/연속/말미 ・는 빈 세그먼트로 버려짐.
+        assert_eq!(
+            split_middle_dot("・A･･B・", 0)
+                .iter()
+                .map(|p| p.0)
+                .collect::<Vec<_>>(),
+            vec!["A", "B"]
+        );
+        // 전부 ・ → 빈 결과.
+        assert!(split_middle_dot("・･", 0).is_empty());
+    }
+
+    #[cfg(feature = "japanese")]
+    #[test]
+    fn japanese_splits_foreign_name_on_middle_dot() {
+        let a = LinderaAnalyzer::new(Lang::Japanese).expect("ipadic 로드 실패");
+        let text = "トーマス・エジソン";
+        let toks = a.tokenize(text);
+        let surfaces: Vec<&str> = toks.iter().map(|t| t.surface.as_str()).collect();
+        assert!(
+            surfaces.contains(&"エジソン"),
+            "・ 뒤 'エジソン'이 별도 토큰이어야: {surfaces:?}"
+        );
+        assert!(
+            surfaces.contains(&"トーマス"),
+            "・ 앞 'トーマス'이 별도 토큰이어야: {surfaces:?}"
+        );
+        assert!(
+            !surfaces.iter().any(|s| s.contains('・')),
+            "・가 토큰 안에 남으면 안 됨: {surfaces:?}"
+        );
+        // byte-offset 불변식: 분리 후에도 text[start..end]==surface.
+        for t in &toks {
+            assert_eq!(text.get(t.byte_start..t.byte_end), Some(t.surface.as_str()));
         }
     }
 

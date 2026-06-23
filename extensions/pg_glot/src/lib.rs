@@ -374,6 +374,28 @@ mod tests {
         assert!(m, "ja 색인/질의 일관성: @@ 매칭");
     }
 
+    /// 가타카나 중점(・)으로 이어진 외국 인명은 하위 토큰으로 분리 색인된다. lindera/ipadic은
+    /// "トーマス・エジソン"을 단일 토큰으로 emit해 "エジソン" 질의가 매칭되지 않았다(MIRACL ja
+    /// 측정: NDCG 0.5387→0.5647, recall +4.4%p). ・에서 분할해 매칭을 복구한다.
+    #[cfg(feature = "japanese")]
+    #[pg_test]
+    fn japanese_splits_on_middle_dot() {
+        // ・ 뒤 성분으로 질의해도 매칭되어야 한다(분리 색인 증거).
+        let m = Spi::get_one::<bool>(
+            "SELECT to_tsvector('japanese', 'トーマス・エジソン') @@ to_tsquery('japanese', 'エジソン')",
+        )
+        .expect("spi")
+        .expect("null");
+        assert!(m, "ja ・ 분리: 'エジソン' 질의가 매칭되어야");
+        // 단일 인명이 2개 lexeme로 분리되었는지.
+        let n = Spi::get_one::<i32>(
+            "SELECT array_length(tsvector_to_array(to_tsvector('japanese', 'トーマス・エジソン')), 1)",
+        )
+        .expect("spi")
+        .expect("null");
+        assert_eq!(n, 2, "・ 분리로 2개 lexeme, 실제 {n}");
+    }
+
     /// 'chinese' config가 중국어를 단어로 분절한다.
     #[cfg(feature = "chinese")]
     #[pg_test]
