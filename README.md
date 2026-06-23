@@ -1,31 +1,66 @@
 # pg_glot_hybrid
 
-기존 pgvector 위에 **한국어 BM25 + 하이브리드(RRF) 검색**을 얹는 PostgreSQL 확장 가족.
-형태소 분석 엔진은 순수 Rust(lindera + 임베드 ko-dic)라 외부 사전 설치가 필요 없다.
+[English](README.md) · [한국어](README.ko.md) · [日本語](README.ja.md) · [中文](README.zh.md)
 
-> 상태: **개발 초기(스캐폴딩)**. Layer A(`pg_glot`) 우선 구현 중. 설계 전문은 [`docs/DESIGN.md`](docs/DESIGN.md).
+A family of PostgreSQL extensions that adds **CJK (Korean / Japanese / Chinese) BM25 +
+hybrid (RRF) search** on top of pgvector. The morphological / segmentation engine is pure
+Rust (lindera + embedded dictionaries), so no external dictionary install is required.
 
-## 구조 (모노레포, Cargo workspace)
+> Status: Layer A (`pg_glot`) and Layer B (`pg_glot_hybrid`) work. BM25/RRF measured on
+> MIRACL dev ([`bench/RESULTS.md`](bench/RESULTS.md)). Full design in
+> [`docs/DESIGN.md`](docs/DESIGN.md). Korean is the most rigorously validated (POS ablation,
+> research parity); ja/zh have measurements but product quality is not yet validated to the
+> ko level.
 
-| 구성요소 | 역할 | 의존 |
+## Layout (monorepo, Cargo workspace)
+
+| Component | Role | Depends on |
 |---|---|---|
-| `crates/glot-tokenizer` | 순수 Rust 한국어 토크나이저 (lindera + ko-dic) | — |
-| `extensions/pg_glot` | (Layer A) 커스텀 TS parser → `korean` text search config | glot-tokenizer |
-| `extensions/pg_glot_hybrid` | (Layer B) 한국어 BM25 + RRF 하이브리드 *(follow-on)* | pg_glot + pg_textsearch + pgvector |
+| `crates/glot-tokenizer` | Pure-Rust CJK tokenizer (lindera + embedded ko-dic/IPADIC/CC-CEDICT) | — |
+| `extensions/pg_glot` | (Layer A) custom TS parser -> `korean`/`japanese`/`chinese` text search config | glot-tokenizer |
+| `extensions/pg_glot_hybrid` | (Layer B) CJK BM25 + RRF hybrid (`glot.hybrid`) | pg_glot + pg_textsearch + pgvector |
 
-설치(예정): `CREATE EXTENSION pg_glot_hybrid CASCADE;` 한 줄로 의존 계층 자동 생성.
+Install: `CREATE EXTENSION pg_glot_hybrid CASCADE;` builds the whole dependency stack in one line.
 
-## 개발
+## Search quality (MIRACL dev, measured)
+
+Measured against a real pg_glot + pg_textsearch BM25 index via `bench/`. Details, caveats, and
+reproduction in [`bench/RESULTS.md`](bench/RESULTS.md). **This is a dev-passages subset, so it
+is not directly comparable to the official leaderboard (indicative only).**
+
+| lang | config | BM25 NDCG@10 | R@10 | RRF NDCG@10 |
+|---|---|---|---|---|
+| ko | `korean`   | **0.636** | 0.798 | 0.755 |
+| ja | `japanese` | **0.565** | 0.773 | 0.691 |
+| zh | `chinese`  | **0.459** | 0.646 | 0.625 |
+
+ko BM25 reaches 99.7% of research MeCab (0.6385). RRF (dense BGE-M3 + BM25) significantly
+improves over BM25 by +0.12–0.17 in all three languages (p<0.001).
+
+**Without lindera, what does stock PG give?** (no morphological analysis, recall@10)
+
+| lang | PG native (simple) | pg_trgm | **lindera** |
+|---|---|---|---|
+| ko | 0.479 | 0.327 | **0.798** |
+| ja | 0.179 | 0.516 | **0.773** |
+| zh | 0.017 | 0.364 | **0.646** |
+
+For space-less ja/zh the native `simple` config nearly collapses (zh R 0.017), and pg_trgm only
+captures substrings. Morphological segmentation (lindera) is essential for CJK search.
+
+## Development
 
 ```bash
-make unit          # 순수 Rust 토크나이저 유닛테스트 (PG 불필요)
-make run           # cargo pgrx run pg17 → psql
+make unit          # pure-Rust tokenizer unit tests (no PG needed)
+make run           # cargo pgrx run pg17 -> psql
 make test          # pg_regress + pg_test (pg17)
 ```
 
-타깃 PostgreSQL: **17** (pgrx-managed). 토대=pgrx(Rust).
+Target PostgreSQL: **17** (pgrx-managed). Foundation = pgrx (Rust). To build fewer languages,
+enable features e.g. `--no-default-features --features "pg17 korean"` (default is all three CJK).
 
-## 라이선스
+## License
 
-PostgreSQL License. 제3자 고지는 [`NOTICE`](NOTICE) 참조. 기본 빌드 경로에 GPL 코드 없음
-(lindera=MIT, ko-dic=Apache-2.0; Kiwi(LGPL)는 opt-in feature).
+PostgreSQL License. Third-party notices in [`NOTICE`](NOTICE). No GPL code on the default build
+path (lindera = MIT, ko-dic = Apache-2.0, IPADIC/CC-CEDICT under their respective dictionary
+licenses; Kiwi (LGPL) is an opt-in feature).
