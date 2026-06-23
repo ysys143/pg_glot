@@ -1,4 +1,4 @@
-comment = 'pg_glot:  Created by pgrx'
+comment = 'pg_glot: CJK (Korean/Japanese/Chinese) text search configs via a lindera-backed custom TS parser; owns the glot schema (glot.rrf)'
 default_version = '@CARGO_VERSION@'
 module_pathname = 'pg_glot'
 relocatable = false
