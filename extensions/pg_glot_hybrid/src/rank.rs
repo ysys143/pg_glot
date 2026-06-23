@@ -111,6 +111,54 @@ mod tests {
         assert_eq!(rank_ids, hybrid_ids);
     }
 
+    /// 폴백 가드: CustomScan이 적용되지 않는 쿼리형태(LIMIT 없는 ORDER BY)에서는
+    /// `try_build_path_config`가 `None`을 반환해 일반 planner 경로로 빠지고,
+    /// `glot.rank`가 plpgsql 마커로 평가되어도 순위가 정상이어야 한다. preload
+    /// hook이 없을 때의 사일런트 폴백과 동일한 비-RRF 평가 경로다.
+    #[pg_test]
+    fn rank_without_limit_falls_back_safely() {
+        setup_rank_table();
+        let plan = Spi::explain(
+            "SELECT id FROM rank_docs \
+             ORDER BY glot.rank(body, emb, '형태소', '[1,0,0]'::vector) DESC, id",
+        )
+        .expect("explain")
+        .0
+        .to_string();
+        assert!(
+            !plan.contains("\"Custom Plan Provider\":\"GlotHybrid\""),
+            "LIMIT 없는 쿼리는 GlotHybrid CustomScan을 쓰지 않아야 함: {plan}"
+        );
+
+        let top = Spi::get_one::<i64>(
+            "SELECT id FROM rank_docs \
+             ORDER BY glot.rank(body, emb, '형태소', '[1,0,0]'::vector) DESC, id \
+             LIMIT 1",
+        )
+        .expect("spi")
+        .expect("null");
+        assert_eq!(top, 1, "폴백 평가 경로에서도 doc 1이 최상위여야 함");
+    }
+
+    /// `ExplainCustomScan`: EXPLAIN이 GlotHybrid 스캔의 내부 후보 SQL(BM25+dense
+    /// 융합을 수행하는 `glot.hybrid` 호출)을 `Hybrid Query` 속성으로 노출한다.
+    #[pg_test]
+    fn rank_custom_scan_explains_hybrid_query() {
+        setup_rank_table();
+        let plan = Spi::explain(
+            "SELECT id, body FROM rank_docs \
+             ORDER BY glot.rank(body, emb, '형태소', '[1,0,0]'::vector) DESC \
+             LIMIT 3",
+        )
+        .expect("explain")
+        .0
+        .to_string();
+        assert!(
+            plan.contains("Hybrid Query") && plan.contains("glot.hybrid"),
+            "EXPLAIN이 custom scan의 hybrid 후보 SQL을 노출해야 함: {plan}"
+        );
+    }
+
     fn collect_ids(sql: &str) -> Vec<i64> {
         Spi::connect(|client| {
             client

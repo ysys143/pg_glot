@@ -48,7 +48,7 @@ static EXEC_METHODS: PgStatic<pg_sys::CustomExecMethods> = PgStatic(pg_sys::Cust
     ReInitializeDSMCustomScan: None,
     InitializeWorkerCustomScan: None,
     ShutdownCustomScan: None,
-    ExplainCustomScan: None,
+    ExplainCustomScan: Some(explain_custom_scan),
 });
 
 static mut PREV_SET_REL_PATHLIST_HOOK: pg_sys::set_rel_pathlist_hook_type = None;
@@ -418,6 +418,35 @@ unsafe extern "C-unwind" fn recheck_candidate(
     _slot: *mut pg_sys::TupleTableSlot,
 ) -> bool {
     true
+}
+
+unsafe extern "C-unwind" fn explain_custom_scan(
+    node: *mut pg_sys::CustomScanState,
+    _ancestors: *mut pg_sys::List,
+    es: *mut pg_sys::ExplainState,
+) {
+    if node.is_null() || es.is_null() {
+        return;
+    }
+
+    // SAFETY: The executor sets `node->ss.ps.plan` to our `CustomScan` plan
+    // before EXPLAIN walks it. The first private entry is the candidate SQL
+    // produced by `try_build_path_config` (same accessor as BeginCustomScan).
+    // `ExplainPropertyText` copies the value, so the temporary `CString` is
+    // safe to drop afterwards.
+    unsafe {
+        let plan = (*node).ss.ps.plan.cast::<pg_sys::CustomScan>();
+        if plan.is_null() {
+            return;
+        }
+        let Some(sql) = private_sql((*plan).custom_private) else {
+            return;
+        };
+        let (Ok(label), Ok(value)) = (CString::new("Hybrid Query"), CString::new(sql)) else {
+            return;
+        };
+        pg_sys::ExplainPropertyText(label.as_ptr(), value.as_ptr(), es);
+    }
 }
 
 fn execute_candidate_query(sql: &str) -> Result<RuntimeState, String> {
