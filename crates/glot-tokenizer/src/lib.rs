@@ -103,13 +103,18 @@ impl Lang {
                 ];
                 ACCEPT.contains(&pos.split('+').next().unwrap_or(""))
             }
-            // ipadic: 助詞(조사)/助動詞(조동사)/記号(기호) 등 제외 → recall 개선(측정 +1.5%p).
+            // ja(ipadic denylist): 助詞(조사)/助動詞(조동사)/記号(기호)/フィラー/感動詞/接続詞
+            // 제외 → recall +1.5%p(측정). accept-list(名詞/動詞/…)와 성능 동등(0.5658≈0.5647,
+            // bench/RESULTS.md §ja/zh)이라 더 단순한 denylist를 채택. ko가 accept-list인 것과
+            // 대비되는 의도된 비대칭(ja는 ipadic POS 체계가 넓어 denylist가 자연스럽다).
             #[cfg(feature = "japanese")]
             Lang::Japanese => !matches!(
                 pos,
                 "助詞" | "助動詞" | "記号" | "フィラー" | "感動詞" | "接続詞"
             ),
-            // cc-cedict는 POS 미제공('*') → 필터 불가(전부 색인). stopword는 후속.
+            // zh(cc-cedict): 사전이 POS를 제공하지 않아('*') 내용어/기능어 구분이 불가 → 필터
+            // 없이 전부 색인(보수적). stopword(的/了/…)도 측정상 무효(−0.22%p, bench/RESULTS.md
+            // §ja/zh)라 미적용. ko(accept)/ja(deny)와 대비되는 의도된 비대칭(사전 한계).
             #[cfg(feature = "chinese")]
             Lang::Chinese => true,
         }
