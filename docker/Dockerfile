@@ -67,8 +67,10 @@ COPY --from=build /usr/share/postgresql/${PG_MAJOR}/extension/pg_textsearch*    
 COPY --from=build /usr/share/postgresql/${PG_MAJOR}/extension/pg_glot*   /usr/share/postgresql/${PG_MAJOR}/extension/
 COPY --from=build /usr/share/postgresql/${PG_MAJOR}/extension/pg_glot_hybrid* /usr/share/postgresql/${PG_MAJOR}/extension/
 
-# 새 클러스터마다 pg_textsearch를 preload(initdb가 conf.sample을 복사).
-RUN echo "shared_preload_libraries = 'pg_textsearch'" \
+# 새 클러스터마다 pg_textsearch + pg_glot_hybrid를 preload(initdb가 conf.sample을 복사).
+# pg_glot_hybrid는 glot.rank CustomScan hook을 _PG_init에서 등록하므로 preload 필요
+# (없으면 glot.rank가 비-RRF 폴백으로 조용히 떨어진다).
+RUN echo "shared_preload_libraries = 'pg_textsearch,pg_glot_hybrid'" \
         >> /usr/share/postgresql/${PG_MAJOR}/postgresql.conf.sample
 
 # 번들 배포 고지(THIRD_PARTY_LICENSES + NOTICE/LICENSE). RUST_CRATES.html 포함.

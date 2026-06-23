@@ -67,24 +67,31 @@ CREATE INDEX ON docs USING hnsw (emb vector_cosine_ops);
 -- 且为 plain ORDER BY ... LIMIT（索引扫描）。
 SELECT id FROM docs ORDER BY body <@> '北京 大学' LIMIT 10;
 
--- 一次调用 = BM25(body) + dense(emb) 经 RRF 融合
+-- Flagship: 混合（BM25 + dense，RRF 融合）像普通 KNN 一样一行写。
+-- body/emb 是真实列，两个查询是字面量。plain ORDER BY ... LIMIT + 字面量时
+-- planner 会选 GlotHybrid custom scan（两路索引 leg + RRF）。
+SELECT id, body
+FROM   docs
+ORDER  BY glot.rank(body, emb, '北京 大学', '[ ... ]'::vector) DESC
+LIMIT  10;
+
+-- 显式 SRF 形式（可组合；相同 RRF 结果，无需 hook）
 SELECT id, score
-FROM   glot.hybrid(
-           'docs',                -- rel (regclass)
-           'id', 'body', 'emb',   -- key / text / vector 列
-           '北京 大学',           -- 查询文本   (BM25 leg)
-           '[ ... ]'::vector,     -- 查询向量   (dense leg)
-           k       => 60,         -- RRF k      (默认 60)
-           per_leg => 60,         -- 每路 top-k (默认 60)
-           n       => 10);        -- 最终行数   (默认 10)
+FROM   glot.hybrid('docs', 'id', 'body', 'emb',
+                   '北京 大学', '[ ... ]'::vector, 60, 60, 10);
 
 -- 或用 RRF 原语直接融合你预先算好的 id 列表（随 Layer A 提供）
 SELECT id, score FROM glot.rrf(ARRAY[10,20,30]::bigint[], ARRAY[20,40]::bigint[], 60);
 ```
 
-**选择表:** 第一个参数（`'docs'`，`regclass`）即要检索的表，随后三个是该表的键/正文/向量列名。
-该表须已建有正文列的 BM25 索引（与 `text_config` 一致）和向量列的向量索引，且键列须为 `bigint`。
-如需可加 schema 限定: `'myschema.docs'`。
+**`glot.rank`（flagship）** 需要 `shared_preload_libraries = 'pg_glot_hybrid'`，因为
+`GlotHybrid` custom-scan hook 在 `_PG_init` 注册（预构建 Docker 镜像已配置）。没有 hook 时
+planner 无法改写查询，`glot.rank` 会**回退为非 RRF 分数**。`body`/`emb` 是真实列引用，两个查询
+须为字面量；表需有 BM25 索引（若也有 HNSW，dense 走索引，否则为精确扫描）。
+
+**`glot.hybrid`（显式形式）:** 第一个参数（`'docs'`，`regclass`）即目标表，随后三个是键/正文/
+向量列。表须有 BM25 索引（与 `text_config` 一致）和向量索引，键列须为 `bigint`。无需 preload hook
+即可工作。如需可加 schema 限定: `'myschema.docs'`。
 
 将 `'public.chinese'`（及 `'chinese'`）换成 `korean`/`japanese` 即可切换语言。
 

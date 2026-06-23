@@ -68,25 +68,32 @@ CREATE INDEX ON docs USING hnsw (emb vector_cosine_ops);
 -- plain ORDER BY ... LIMIT(인덱스 스캔)이어야 한다.
 SELECT id FROM docs ORDER BY body <@> '형태소 분석' LIMIT 10;
 
--- 한 번의 호출 = BM25(body) + dense(emb)를 RRF로 융합
+-- Flagship: 하이브리드(BM25 + dense, RRF 융합)를 일반 KNN처럼 한 줄로.
+-- body/emb는 진짜 컬럼, 질의 둘은 리터럴. plain ORDER BY ... LIMIT + 리터럴이면
+-- planner가 GlotHybrid custom scan을 선택(두 인덱스 leg + RRF).
+SELECT id, body
+FROM   docs
+ORDER  BY glot.rank(body, emb, '형태소 분석', '[ ... ]'::vector) DESC
+LIMIT  10;
+
+-- 명시적 SRF 형태(합성 가능; 동일 RRF 결과, hook 불필요)
 SELECT id, score
-FROM   glot.hybrid(
-           'docs',                -- rel (regclass)
-           'id', 'body', 'emb',   -- key / text / vector 컬럼
-           '형태소 분석',          -- 질의 텍스트   (BM25 leg)
-           '[ ... ]'::vector,     -- 질의 벡터     (dense leg)
-           k       => 60,         -- RRF k         (기본 60)
-           per_leg => 60,         -- leg별 top-k   (기본 60)
-           n       => 10);        -- 최종 행 수    (기본 10)
+FROM   glot.hybrid('docs', 'id', 'body', 'emb',
+                   '형태소 분석', '[ ... ]'::vector, 60, 60, 10);
 
 -- 또는 미리 만든 id 리스트를 RRF 프리미티브로 직접 융합 (Layer A에 동봉)
 SELECT id, score FROM glot.rrf(ARRAY[10,20,30]::bigint[], ARRAY[20,40]::bigint[], 60);
 ```
 
-**테이블 선택:** 첫 번째 인자(`'docs'`, `regclass`)가 검색 대상 테이블이고, 그 뒤 셋은 그
-테이블의 키/본문/벡터 컬럼명이다. 해당 테이블에는 본문 컬럼의 BM25 인덱스(`text_config` 일치)와
-벡터 컬럼의 벡터 인덱스가 미리 있어야 하며, 키 컬럼은 `bigint`여야 한다. 필요하면 스키마
-한정: `'myschema.docs'`.
+**`glot.rank` (flagship)** 은 `shared_preload_libraries = 'pg_glot_hybrid'` 가 필요하다 —
+`GlotHybrid` custom-scan hook을 `_PG_init`에서 등록하기 때문(프리빌드 Docker 이미지는 설정 완료).
+hook이 없으면 planner가 질의를 재작성하지 못해 `glot.rank`가 **비-RRF 점수로 폴백**한다.
+`body`/`emb`는 진짜 컬럼 참조, 질의 둘은 리터럴; 테이블에 BM25 인덱스 필요(HNSW도 있으면 dense가
+인덱스, 없으면 exact 스캔).
+
+**`glot.hybrid` (명시적 형태):** 첫 인자(`'docs'`, `regclass`)가 대상 테이블, 그 뒤 셋은 키/본문/
+벡터 컬럼. 테이블에 BM25 인덱스(`text_config` 일치)와 벡터 인덱스가 있어야 하고 키 컬럼은
+`bigint`. preload hook 없이도 동작. 필요하면 스키마 한정: `'myschema.docs'`.
 
 `'public.korean'`(및 `'korean'`)을 `japanese`/`chinese`로 바꾸면 언어가 전환된다.
 
