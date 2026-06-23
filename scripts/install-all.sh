@@ -65,8 +65,8 @@ done
 log "설치 완료. 남은 1회 단계 (수동):"
 cat <<'EOF'
   1) postgresql.conf 에 추가 후 PostgreSQL 재시작
-       shared_preload_libraries = 'pg_textsearch'
-     (기존 preload가 있으면 콤마로 이어붙일 것)
+       shared_preload_libraries = 'pg_textsearch,pg_glot_hybrid'
+     (pg_glot_hybrid는 glot.rank CustomScan hook 등록용; 기존 preload 있으면 콤마로 이어붙일 것)
   2) psql 에서 한 줄로 전체 스택 생성
        CREATE EXTENSION pg_glot_hybrid CASCADE;
      -> pg_glot + pg_textsearch + vector 가 함께 생성됩니다.

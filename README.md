@@ -18,7 +18,7 @@ Rust (lindera + embedded dictionaries), so no external dictionary install is req
 |---|---|---|
 | `crates/glot-tokenizer` | Pure-Rust CJK tokenizer (lindera + embedded ko-dic/IPADIC/CC-CEDICT) | — |
 | `extensions/pg_glot` | (Layer A) custom TS parser -> `korean`/`japanese`/`chinese` text search config; owns the `glot` schema (`glot.rrf`) | glot-tokenizer |
-| `extensions/pg_glot_hybrid` | (Layer B) CJK BM25 + RRF hybrid (`glot.hybrid`) | pg_glot + pg_textsearch + pgvector |
+| `extensions/pg_glot_hybrid` | (Layer B) CJK BM25 + RRF hybrid — `glot.rank` custom scan (`ORDER BY ... LIMIT`) + `glot.hybrid` SRF | pg_glot + pg_textsearch + pgvector |
 
 ## Install — separable layers
 
@@ -71,25 +71,33 @@ CREATE INDEX ON docs USING hnsw (emb vector_cosine_ops);
 -- a plain ORDER BY ... LIMIT (index scan).
 SELECT id FROM docs ORDER BY body <@> '형태소 분석' LIMIT 10;
 
--- one call = BM25(body) + dense(emb) fused by RRF
+-- Flagship: hybrid (BM25 + dense, fused by RRF) reads like a normal KNN query.
+-- `body`/`emb` are real columns; the two queries are literals. A plain ORDER BY ... LIMIT with
+-- literal queries lets the planner pick the GlotHybrid custom scan (both index legs + RRF).
+SELECT id, body
+FROM   docs
+ORDER  BY glot.rank(body, emb, '형태소 분석', '[ ... ]'::vector) DESC
+LIMIT  10;
+
+-- Explicit set-returning form (composable; same RRF result, no hook needed)
 SELECT id, score
-FROM   glot.hybrid(
-           'docs',                -- rel (regclass)
-           'id', 'body', 'emb',   -- key / text / vector columns
-           '형태소 분석',          -- query text  (BM25 leg)
-           '[ ... ]'::vector,     -- query vector (dense leg)
-           k       => 60,         -- RRF k        (default 60)
-           per_leg => 60,         -- top-k per leg (default 60)
-           n       => 10);        -- final rows   (default 10)
+FROM   glot.hybrid('docs', 'id', 'body', 'emb',
+                   '형태소 분석', '[ ... ]'::vector, 60, 60, 10);
 
 -- or fuse your own pre-computed id lists with the RRF primitive (ships with Layer A)
 SELECT id, score FROM glot.rrf(ARRAY[10,20,30]::bigint[], ARRAY[20,40]::bigint[], 60);
 ```
 
-**Selecting the table:** the first argument (`'docs'`, a `regclass`) is the table to search;
-the next three are its key / text / vector column names. That table must already have a BM25
-index on the text column (matching `text_config`) and a vector index on the vector column, and
-the key column must be `bigint`. Schema-qualify if needed: `'myschema.docs'`.
+**`glot.rank` (flagship)** needs `shared_preload_libraries = 'pg_glot_hybrid'` so the `GlotHybrid`
+custom-scan hook is installed (the prebuilt Docker image sets this up). Without the hook the
+planner cannot rewrite the query and `glot.rank` falls back to a non-RRF score. `body`/`emb` are
+real column references; the two queries must be literals; the table needs a BM25 index (and,
+ideally, an HNSW index — otherwise the dense leg is an exact scan).
+
+**`glot.hybrid` (explicit form):** the first argument (`'docs'`, a `regclass`) is the table; the
+next three are its key / text / vector columns. The table must have the BM25 index (matching
+`text_config`) and a vector index, and the key column must be `bigint`. Works without the preload
+hook. Schema-qualify if needed: `'myschema.docs'`.
 
 Swap `'public.korean'` (and `'korean'`) for `japanese` or `chinese` to switch language.
 
