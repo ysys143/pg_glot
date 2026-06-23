@@ -1,41 +1,52 @@
-# pg_glot_hybrid
+# pg_glot
 
 [English](README.md) · [한국어](README.ko.md) · [日本語](README.ja.md) · [中文](README.zh.md)
 
-在 pgvector 之上叠加 **CJK（韩语・日语・汉语）BM25 + 混合（RRF）检索**的 PostgreSQL 扩展家族。
-形态素／分词引擎为纯 Rust（lindera + 内嵌词典），无需安装外部词典。
+**pg_glot** 为 PostgreSQL 带来 **CJK（韩语・日语・汉语）全文检索与 BM25 + dense 混合（RRF）
+检索**（构建于 pgvector 之上）。形态素／分词引擎为纯 Rust（lindera + 内嵌词典），无需安装外部
+词典。
 
-> 状态: Layer A（`pg_glot`）与 Layer B（`pg_glot_hybrid`）已可用。在 MIRACL dev 上实测
-> BM25/RRF（[`bench/RESULTS.md`](bench/RESULTS.md)）。完整设计见
-> [`docs/DESIGN.md`](docs/DESIGN.md)。ko 验证最严格（POS ablation、与 research 持平）；ja/zh
-> 已有测量值，但产品质量尚未达到 ko 的验证水平。
+它以两个可独立采用的扩展形式提供:
 
-## 结构（monorepo，Cargo workspace）
+- **`pg_glot`** — CJK 分词器与 `korean` / `japanese` / `chinese` 文本检索 config（普通的
+  PostgreSQL 全文检索），以及 `glot.rrf` 融合原语。
+- **`pg_glot_hybrid`** — BM25 索引与 BM25 + dense 混合检索（`glot.rank`、`glot.hybrid`），
+  构建于 `pg_glot` + `pg_textsearch` + `pgvector` 之上。
+
+> **状态** — 两个扩展均可用。在 MIRACL dev 上实测 BM25/RRF
+> （[`bench/RESULTS.md`](bench/RESULTS.md)）。ko 验证最严格（POS ablation、与 research 持平）；
+> ja/zh 已有测量值，但产品质量尚未达到 ko 的验证水平。完整设计与决策见
+> [`docs/DESIGN.md`](docs/DESIGN.md)。
+
+## 组件
+
+单一 monorepo（Cargo workspace），每个扩展边界清晰，可独立安装:
 
 | 组件 | 作用 | 依赖 |
 |---|---|---|
-| `crates/glot-tokenizer` | 纯 Rust CJK 分词器（lindera + 内嵌 ko-dic/IPADIC/CC-CEDICT） | — |
-| `extensions/pg_glot` | (Layer A) 自定义 TS parser → `korean`/`japanese`/`chinese` config；拥有 `glot` schema（`glot.rrf`） | glot-tokenizer |
-| `extensions/pg_glot_hybrid` | (Layer B) CJK BM25 + RRF 混合 — `glot.rank` custom scan（`ORDER BY ... LIMIT`）+ `glot.hybrid` SRF | pg_glot + pg_textsearch + pgvector |
+| `crates/glot-tokenizer` | 纯 Rust CJK 分词器（lindera + 内嵌 ko-dic / IPADIC / CC-CEDICT） | — |
+| `extensions/pg_glot` | 自定义 TS parser → `korean` / `japanese` / `chinese` config；拥有 `glot` schema（`glot.rrf`） | glot-tokenizer |
+| `extensions/pg_glot_hybrid` | CJK BM25 + RRF 混合 — `glot.rank` custom scan（`ORDER BY … LIMIT`）+ `glot.hybrid` SRF | pg_glot + pg_textsearch + pgvector |
 
-## 安装 — 按层分离安装
+## 安装
 
-虽是单一 monorepo，但**每层都是边界清晰的独立扩展/crate，因此只需安装所需部分。**
-`pg_textsearch`・`pgvector` 是依赖（`requires`）而非内置，可按各自节奏升级。
+**只安装你需要的部分** — `pg_textsearch`・`pgvector` 是依赖（`requires`）而非内置，可按各自节奏
+升级。
 
 | 你想要 | 安装 | 自动带入 |
 |---|---|---|
 | 完整混合（BM25 + dense RRF） | `CREATE EXTENSION pg_glot_hybrid CASCADE;` | pg_glot + pg_textsearch + pgvector（经 `requires` 自动） |
 | 仅 CJK 全文检索（`to_tsvector` / `@@` / `ts_rank`） | `CREATE EXTENSION pg_glot;` | 无 — 零额外依赖 |
-| RRF 融合原语（`glot.rrf`） | `CREATE EXTENSION pg_glot;` | —（`glot` schema 随 Layer A 提供） |
+| RRF 融合原语（`glot.rrf`） | `CREATE EXTENSION pg_glot;` | —（`glot` schema 随 `pg_glot` 提供） |
 | 在 PostgreSQL 之外仅用分词器 | 依赖 `glot-tokenizer` crate | — |
 
-`pg_textsearch` 需要 `shared_preload_libraries = 'pg_textsearch'`（预构建 Docker 镜像已配置）。
-当前为 monorepo，但边界清晰，日后拆分为独立仓库是机械性的。
+混合路径需要 `shared_preload_libraries = 'pg_textsearch, pg_glot_hybrid'`（预构建 Docker 镜像
+已配置）: `pg_textsearch` 提供 BM25，`pg_glot_hybrid` 注册 `glot.rank` custom-scan hook。边界
+清晰，日后拆分为独立仓库是机械性的。
 
 ## 用法
 
-### Layer A — CJK 全文检索（仅 `pg_glot`）
+### `pg_glot` — CJK 全文检索
 
 ```sql
 CREATE EXTENSION pg_glot;
@@ -51,7 +62,7 @@ WHERE  to_tsvector('chinese', body) @@ to_tsquery('chinese', '北京')
 ORDER  BY ts_rank(to_tsvector('chinese', body), to_tsquery('chinese', '北京')) DESC;
 ```
 
-### Layer B — BM25 + 混合 RRF（`pg_glot_hybrid`）
+### `pg_glot_hybrid` — BM25 + 混合 RRF
 
 ```sql
 CREATE EXTENSION pg_glot_hybrid CASCADE;   -- 自动安装 pg_glot + pg_textsearch + pgvector
@@ -80,24 +91,24 @@ SELECT id, score
 FROM   glot.hybrid('docs', 'id', 'body', 'emb',
                    '北京 大学', '[ ... ]'::vector, 60, 60, 10);
 
--- 或用 RRF 原语直接融合你预先算好的 id 列表（随 Layer A 提供）
+-- 或用 RRF 原语直接融合你预先算好的 id 列表（随 pg_glot 提供）
 SELECT id, score FROM glot.rrf(ARRAY[10,20,30]::bigint[], ARRAY[20,40]::bigint[], 60);
 ```
 
-**`glot.rank`（flagship）** 需要 `shared_preload_libraries = 'pg_glot_hybrid'`，因为
-`GlotHybrid` custom-scan hook 在 `_PG_init` 注册（预构建 Docker 镜像已配置）。没有 hook 时
-planner 无法改写查询，`glot.rank` 会**回退为非 RRF 分数**。`body`/`emb` 是真实列引用，两个查询
-须为字面量；表需有 BM25 索引（若也有 HNSW，dense 走索引，否则为精确扫描）。
+**`glot.rank`（flagship）** 需要 `shared_preload_libraries = 'pg_glot_hybrid'`，以便注册
+`GlotHybrid` custom-scan hook（预构建 Docker 镜像已配置）。没有 hook 时 planner 无法改写查询，
+`glot.rank` 会**回退为非 RRF 分数**。`body`/`emb` 是真实列引用，两个查询须为字面量；表需有
+BM25 索引（若也有 HNSW，dense 走索引，否则为精确扫描）。
 
-**`glot.hybrid`（显式形式）:** 第一个参数（`'docs'`，`regclass`）即目标表，随后三个是键/正文/
-向量列。表须有 BM25 索引（与 `text_config` 一致）和向量索引，键列须为 `bigint`。无需 preload hook
-即可工作。如需可加 schema 限定: `'myschema.docs'`。
+**`glot.hybrid`（显式形式）** 第一个参数（`'docs'`，`regclass`）即目标表，随后三个是键/正文/
+向量列。表须有 BM25 索引（与 `text_config` 一致）和向量索引，键列须为 `bigint`。无需 preload
+hook 即可工作。如需可加 schema 限定: `'myschema.docs'`。
 
 将 `'public.chinese'`（及 `'chinese'`）换成 `korean`/`japanese` 即可切换语言。
 
 ## 检索质量（MIRACL dev，实测）
 
-通过 `bench/` 在真实 pg_glot + pg_textsearch BM25 索引上测量。详情、限制与复现见
+通过 `bench/` 在真实 `pg_glot` + `pg_textsearch` BM25 索引上测量。详情、限制与复现见
 [`bench/RESULTS.md`](bench/RESULTS.md)。**这是 dev passages 子集，无法与官方排行榜直接比较
 （仅供参考）。**
 
@@ -108,11 +119,11 @@ planner 无法改写查询，`glot.rank` 会**回退为非 RRF 分数**。`body`
 | zh | `chinese`  | **0.459** | 0.646 | 0.625 |
 
 ko 的 BM25 达到 research MeCab（0.6385）的 99.7%。RRF（dense BGE-M3 + BM25）在三种语言上都
-显著优于 BM25，提升 +0.12~0.17（p<0.001）。
+显著优于 BM25，提升 +0.12~0.17（p < 0.001）。
 
-**没有 lindera，仅用原生 PG 会如何?**（无形态素分析，recall@10）
+**没有 lindera，仅用原生 PostgreSQL 会如何?**（无形态素分析，recall@10）
 
-| lang | PG native（simple） | pg_trgm | **lindera** |
+| lang | PG native（`simple`） | pg_trgm | **lindera** |
 |---|---|---|---|
 | ko | 0.479 | 0.327 | **0.798** |
 | ja | 0.179 | 0.516 | **0.773** |
