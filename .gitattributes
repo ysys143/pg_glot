@@ -1,0 +1,7 @@
+# GitHub Linguist 언어 통계 보정.
+# 의존성 라이선스 고지는 우리 소스가 아니라 배포용 산출물/문서이므로,
+# 언어 비율과 diff에서 제외한다(이게 없으면 287KB짜리 RUST_CRATES.html이
+# 레포를 'HTML 프로젝트'로 잘못 분류한다).
+THIRD_PARTY_LICENSES/**            linguist-documentation=true
+THIRD_PARTY_LICENSES/RUST_CRATES.html linguist-generated=true
+about.hbs                          linguist-documentation=true
