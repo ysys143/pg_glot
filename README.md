@@ -86,6 +86,11 @@ FROM   glot.hybrid(
 SELECT id, score FROM glot.rrf(ARRAY[10,20,30]::bigint[], ARRAY[20,40]::bigint[], 60);
 ```
 
+**Selecting the table:** the first argument (`'docs'`, a `regclass`) is the table to search;
+the next three are its key / text / vector column names. That table must already have a BM25
+index on the text column (matching `text_config`) and a vector index on the vector column, and
+the key column must be `bigint`. Schema-qualify if needed: `'myschema.docs'`.
+
 Swap `'public.korean'` (and `'korean'`) for `japanese` or `chinese` to switch language.
 
 ## Search quality (MIRACL dev, measured)

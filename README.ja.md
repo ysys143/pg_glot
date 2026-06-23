@@ -84,6 +84,11 @@ FROM   glot.hybrid(
 SELECT id, score FROM glot.rrf(ARRAY[10,20,30]::bigint[], ARRAY[20,40]::bigint[], 60);
 ```
 
+**テーブルの選択:** 第 1 引数（`'docs'`, `regclass`）が検索対象のテーブルで、続く 3 つはその
+テーブルのキー/本文/ベクトル列名。そのテーブルには本文列の BM25 インデックス（`text_config`
+一致）とベクトル列のベクトルインデックスが事前に必要で、キー列は `bigint` であること。必要なら
+スキーマ修飾: `'myschema.docs'`。
+
 `'public.japanese'`（および `'japanese'`）を `korean`/`chinese` に変えれば言語が切り替わる。
 
 ## 検索品質（MIRACL dev、実測）

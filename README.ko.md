@@ -83,6 +83,11 @@ FROM   glot.hybrid(
 SELECT id, score FROM glot.rrf(ARRAY[10,20,30]::bigint[], ARRAY[20,40]::bigint[], 60);
 ```
 
+**테이블 선택:** 첫 번째 인자(`'docs'`, `regclass`)가 검색 대상 테이블이고, 그 뒤 셋은 그
+테이블의 키/본문/벡터 컬럼명이다. 해당 테이블에는 본문 컬럼의 BM25 인덱스(`text_config` 일치)와
+벡터 컬럼의 벡터 인덱스가 미리 있어야 하며, 키 컬럼은 `bigint`여야 한다. 필요하면 스키마
+한정: `'myschema.docs'`.
+
 `'public.korean'`(및 `'korean'`)을 `japanese`/`chinese`로 바꾸면 언어가 전환된다.
 
 ## 검색 품질 (MIRACL dev, 실측)

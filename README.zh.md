@@ -82,6 +82,10 @@ FROM   glot.hybrid(
 SELECT id, score FROM glot.rrf(ARRAY[10,20,30]::bigint[], ARRAY[20,40]::bigint[], 60);
 ```
 
+**选择表:** 第一个参数（`'docs'`，`regclass`）即要检索的表，随后三个是该表的键/正文/向量列名。
+该表须已建有正文列的 BM25 索引（与 `text_config` 一致）和向量列的向量索引，且键列须为 `bigint`。
+如需可加 schema 限定: `'myschema.docs'`。
+
 将 `'public.chinese'`（及 `'chinese'`）换成 `korean`/`japanese` 即可切换语言。
 
 ## 检索质量（MIRACL dev，实测）
