@@ -62,7 +62,7 @@ def evaluate(
         )
         conn.commit()
 
-        ndcgs, recalls, empty = [], [], 0
+        ndcgs, recalls, empty, per_query = [], [], 0, []
         for q in queries:
             # 리터럴 인라인(planner hook은 Const 질의만 인덱스 매칭).
             stmt = sql.SQL("SELECT id FROM eval_docs ORDER BY body <@> {} LIMIT {}").format(
@@ -72,8 +72,10 @@ def evaluate(
             retrieved = [r[0] for r in cur.fetchall()]
             if not retrieved:
                 empty += 1
-            ndcgs.append(ndcg_at_k(q["relevant_ids"], retrieved, k))
+            nd = ndcg_at_k(q["relevant_ids"], retrieved, k)
+            ndcgs.append(nd)
             recalls.append(recall_at_k(q["relevant_ids"], retrieved, k))
+            per_query.append({"query_id": str(q.get("query_id", "")), "ndcg": nd})
 
     return {
         "lang": lang,
@@ -83,6 +85,7 @@ def evaluate(
         "ndcg@10": round(statistics.mean(ndcgs), 4),
         "recall@10": round(statistics.mean(recalls), 4),
         "empty_results": empty,
+        "per_query": per_query,
     }
 
 
@@ -106,6 +109,7 @@ def main() -> int:
 
     with psycopg.connect(a.dsn, autocommit=False) as conn:
         res = evaluate(conn, a.lang, corpus, queries, a.k, a.config)
+    res.pop("per_query", None)  # 요약 출력엔 per-query 리스트 제외(stats.py가 직접 사용)
     print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0
 
