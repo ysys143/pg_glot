@@ -1,4 +1,4 @@
-comment = 'Korean BM25 + RRF hybrid search (pg_textsearch + pgvector over the korean config)'
+comment = 'CJK (Korean/Japanese/Chinese) BM25 + RRF hybrid search (pg_textsearch + pgvector over the korean/japanese/chinese configs)'
 default_version = '@CARGO_VERSION@'
 module_pathname = 'pg_glot_hybrid'
 relocatable = false

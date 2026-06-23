@@ -17,10 +17,76 @@ Rust (lindera + embedded dictionaries), so no external dictionary install is req
 | Component | Role | Depends on |
 |---|---|---|
 | `crates/glot-tokenizer` | Pure-Rust CJK tokenizer (lindera + embedded ko-dic/IPADIC/CC-CEDICT) | — |
-| `extensions/pg_glot` | (Layer A) custom TS parser -> `korean`/`japanese`/`chinese` text search config | glot-tokenizer |
+| `extensions/pg_glot` | (Layer A) custom TS parser -> `korean`/`japanese`/`chinese` text search config; owns the `glot` schema (`glot.rrf`) | glot-tokenizer |
 | `extensions/pg_glot_hybrid` | (Layer B) CJK BM25 + RRF hybrid (`glot.hybrid`) | pg_glot + pg_textsearch + pgvector |
 
-Install: `CREATE EXTENSION pg_glot_hybrid CASCADE;` builds the whole dependency stack in one line.
+## Install — separable layers
+
+It is one monorepo, but **each layer is an independent extension/crate with clean boundaries, so
+you install only what you need.** `pg_textsearch` and `pgvector` are dependencies (`requires`),
+not vendored — you upgrade them on their own schedule.
+
+| You want… | Install | Pulls in |
+|---|---|---|
+| Full hybrid (BM25 + dense RRF) | `CREATE EXTENSION pg_glot_hybrid CASCADE;` | pg_glot + pg_textsearch + pgvector (auto, via `requires`) |
+| CJK full-text search only (`to_tsvector` / `@@` / `ts_rank`) | `CREATE EXTENSION pg_glot;` | nothing else — zero extra deps |
+| The RRF fusion primitive (`glot.rrf`) | `CREATE EXTENSION pg_glot;` | — (the `glot` schema ships with Layer A) |
+| The tokenizer outside PostgreSQL | depend on the `glot-tokenizer` crate | — |
+
+`pg_textsearch` needs `shared_preload_libraries = 'pg_textsearch'` (the prebuilt Docker image
+sets this up). Monorepo today; the clean boundaries make splitting into separate repos
+mechanical later.
+
+## Usage
+
+### Layer A — CJK full-text search (`pg_glot` alone)
+
+```sql
+CREATE EXTENSION pg_glot;
+
+-- tokenize via the language config (korean / japanese / chinese)
+SELECT to_tsvector('korean',   '한국어 형태소 분석');
+SELECT to_tsvector('japanese', '東京都に住む');
+
+-- match / rank like any PostgreSQL full-text search
+SELECT id
+FROM   docs
+WHERE  to_tsvector('korean', body) @@ to_tsquery('korean', '형태소')
+ORDER  BY ts_rank(to_tsvector('korean', body), to_tsquery('korean', '형태소')) DESC;
+```
+
+### Layer B — BM25 + hybrid RRF (`pg_glot_hybrid`)
+
+```sql
+CREATE EXTENSION pg_glot_hybrid CASCADE;   -- pulls pg_glot + pg_textsearch + pgvector
+
+CREATE TABLE docs (id bigint PRIMARY KEY, body text, emb vector(1024));
+
+-- BM25 index over the CJK config (schema-qualify the config name)
+CREATE INDEX ON docs USING bm25(body) WITH (text_config = 'public.korean');
+-- dense index
+CREATE INDEX ON docs USING hnsw (emb vector_cosine_ops);
+
+-- BM25-only ranking. NOTE: the query must be a literal (planner hook) and use
+-- a plain ORDER BY ... LIMIT (index scan).
+SELECT id FROM docs ORDER BY body <@> '형태소 분석' LIMIT 10;
+
+-- one call = BM25(body) + dense(emb) fused by RRF
+SELECT id, score
+FROM   glot.hybrid(
+           'docs',                -- rel (regclass)
+           'id', 'body', 'emb',   -- key / text / vector columns
+           '형태소 분석',          -- query text  (BM25 leg)
+           '[ ... ]'::vector,     -- query vector (dense leg)
+           k       => 60,         -- RRF k        (default 60)
+           per_leg => 60,         -- top-k per leg (default 60)
+           n       => 10);        -- final rows   (default 10)
+
+-- or fuse your own pre-computed id lists with the RRF primitive (ships with Layer A)
+SELECT id, score FROM glot.rrf(ARRAY[10,20,30]::bigint[], ARRAY[20,40]::bigint[], 60);
+```
+
+Swap `'public.korean'` (and `'korean'`) for `japanese` or `chinese` to switch language.
 
 ## Search quality (MIRACL dev, measured)
 
@@ -63,4 +129,5 @@ enable features e.g. `--no-default-features --features "pg17 korean"` (default i
 
 PostgreSQL License. Third-party notices in [`NOTICE`](NOTICE). No GPL code on the default build
 path (lindera = MIT, ko-dic = Apache-2.0, IPADIC/CC-CEDICT under their respective dictionary
-licenses; Kiwi (LGPL) is an opt-in feature).
+licenses). A Kiwi (LGPL) backend is designed (see [`docs/DESIGN.md`](docs/DESIGN.md) D5) but not
+yet implemented; if added it would be opt-in and dynamically linked.
