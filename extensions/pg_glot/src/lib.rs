@@ -420,6 +420,30 @@ mod tests {
         assert!(m, "zh 색인/질의 일관성: @@ 매칭");
     }
 
+    /// 'chinese' POS 필터 부재(ko accept / ja deny와 대비되는 의도된 비대칭). cc-cedict는 POS를
+    /// 제공하지 않아('*') 내용어/기능어 구분이 불가 → 전부 색인한다. 따라서 ko/ja라면 떨굴
+    /// 기능어 '的'도 zh에서는 색인되어 질의로 매칭된다.
+    #[cfg(feature = "chinese")]
+    #[pg_test]
+    fn chinese_keeps_function_words_no_pos_filter() {
+        let m = Spi::get_one::<bool>(
+            "SELECT to_tsvector('chinese', '这是我的书') @@ to_tsquery('chinese', '的')",
+        )
+        .expect("spi")
+        .expect("null");
+        assert!(m, "zh는 POS 필터 없음 → 기능어 '的'도 색인/매칭되어야");
+    }
+
+    /// ts_debug가 중국어 단어를 'word' 타입으로 라벨한다(ko/ja와 동일 형식의 parser 라벨 검증).
+    #[cfg(feature = "chinese")]
+    #[pg_test]
+    fn ts_debug_labels_chinese_as_word() {
+        let a = Spi::get_one::<String>("SELECT alias FROM ts_debug('chinese', '北京') LIMIT 1")
+            .expect("spi")
+            .expect("null");
+        assert_eq!(a, "word", "zh 단어는 'word' 타입이어야");
+    }
+
     // ── POS 필터: ko(MeCab accept-list)·ja(기능어 제외)로 내용어만 색인. zh는 POS 미제공. ──
 
     /// ko: 조사/어미는 빠지고 내용어(명사/용언)만 남는다.
