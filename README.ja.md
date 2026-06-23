@@ -17,7 +17,7 @@ PostgreSQL 拡張ファミリ。形態素・分割エンジンは純 Rust（lind
 |---|---|---|
 | `crates/glot-tokenizer` | 純 Rust の CJK トークナイザ（lindera + 組み込み ko-dic/IPADIC/CC-CEDICT） | — |
 | `extensions/pg_glot` | (Layer A) カスタム TS parser → `korean`/`japanese`/`chinese` config；`glot` スキーマ（`glot.rrf`）を所有 | glot-tokenizer |
-| `extensions/pg_glot_hybrid` | (Layer B) CJK BM25 + RRF ハイブリッド（`glot.hybrid`） | pg_glot + pg_textsearch + pgvector |
+| `extensions/pg_glot_hybrid` | (Layer B) CJK BM25 + RRF ハイブリッド — `glot.rank` custom scan（`ORDER BY ... LIMIT`）+ `glot.hybrid` SRF | pg_glot + pg_textsearch + pgvector |
 
 ## インストール — 層ごとに分離
 

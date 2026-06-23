@@ -16,7 +16,7 @@
 |---|---|---|
 | `crates/glot-tokenizer` | 纯 Rust CJK 分词器（lindera + 内嵌 ko-dic/IPADIC/CC-CEDICT） | — |
 | `extensions/pg_glot` | (Layer A) 自定义 TS parser → `korean`/`japanese`/`chinese` config；拥有 `glot` schema（`glot.rrf`） | glot-tokenizer |
-| `extensions/pg_glot_hybrid` | (Layer B) CJK BM25 + RRF 混合（`glot.hybrid`） | pg_glot + pg_textsearch + pgvector |
+| `extensions/pg_glot_hybrid` | (Layer B) CJK BM25 + RRF 混合 — `glot.rank` custom scan（`ORDER BY ... LIMIT`）+ `glot.hybrid` SRF | pg_glot + pg_textsearch + pgvector |
 
 ## 安装 — 按层分离安装
 
