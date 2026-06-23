@@ -16,7 +16,21 @@
 
 use pgrx::prelude::*;
 
+mod customscan;
+mod rank;
+
 ::pgrx::pg_module_magic!(name, version);
+
+extension_sql!(
+    "LOAD '$libdir/pg_glot_hybrid';",
+    name = "load_pg_glot_hybrid_library",
+    bootstrap
+);
+
+#[pg_guard]
+pub extern "C-unwind" fn _PG_init() {
+    customscan::init();
+}
 
 // glot.rrf 융합 프리미티브는 Layer A(pg_glot)가 `glot` 스키마와 함께 소유한다
 // (rrf는 언어/백엔드 무관 공통 유틸). 이 확장은 그 위에 glot.hybrid를 더한다.
@@ -405,9 +419,8 @@ mod tests {
 pub mod pg_test {
     pub fn setup(_options: Vec<&str>) {}
 
-    /// pg_textsearch BM25 access method는 프로세스 시작 시 로드돼야 한다.
     #[must_use]
     pub fn postgresql_conf_options() -> Vec<&'static str> {
-        vec!["shared_preload_libraries = 'pg_textsearch'"]
+        vec!["shared_preload_libraries = 'pg_textsearch,pg_glot_hybrid'"]
     }
 }
